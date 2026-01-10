@@ -2,6 +2,11 @@
 
 EzPay 是一个使用 Go 语言开发的多通道聚合收款平台，支持 USDT/TRX 加密货币和微信/支付宝法币收款，兼容彩虹易支付和 V免签接口协议。
 
+## 技术支持
+
+- Telegram 群组: https://t.me/OpineWorkPublish
+- Telegram 频道: https://t.me/OpineWorkPublish
+
 ## 功能特性
 
 ### 支付通道

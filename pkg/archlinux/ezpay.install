@@ -1,0 +1,47 @@
+post_install() {
+    # Create ezpay user and group
+    if ! getent group ezpay >/dev/null; then
+        groupadd -r ezpay
+    fi
+    if ! getent passwd ezpay >/dev/null; then
+        useradd -r -g ezpay -d /var/lib/ezpay -s /usr/bin/nologin -c "EzPay Payment Gateway" ezpay
+    fi
+
+    # Set ownership
+    chown -R ezpay:ezpay /var/lib/ezpay
+    chown -R ezpay:ezpay /var/log/ezpay
+    chown -R ezpay:ezpay /usr/share/ezpay
+
+    # Set config permissions
+    chown ezpay:ezpay /etc/ezpay/config.yaml
+    chmod 600 /etc/ezpay/config.yaml
+
+    echo "==> EzPay installed successfully!"
+    echo "==> Please edit /etc/ezpay/config.yaml before starting the service"
+    echo "==> To start: systemctl start ezpay"
+    echo "==> To enable on boot: systemctl enable ezpay"
+}
+
+post_upgrade() {
+    # Set ownership for new files
+    chown -R ezpay:ezpay /usr/share/ezpay
+
+    echo "==> EzPay upgraded successfully!"
+    echo "==> Please restart the service: systemctl restart ezpay"
+}
+
+pre_remove() {
+    # Stop service before removal
+    if systemctl is-active --quiet ezpay; then
+        systemctl stop ezpay
+    fi
+    if systemctl is-enabled --quiet ezpay; then
+        systemctl disable ezpay
+    fi
+}
+
+post_remove() {
+    echo "==> EzPay removed."
+    echo "==> User 'ezpay' and data in /var/lib/ezpay were preserved."
+    echo "==> To remove completely: userdel -r ezpay"
+}

@@ -1,0 +1,178 @@
+# ============================================================================
+# EzPay 配置文件
+# ============================================================================
+# 所有配置项都可在此文件中设置，无需使用 .env 文件
+# 管理员账号和Telegram配置在数据库/管理后台中管理
+# ============================================================================
+
+# ============================================================================
+# 服务器配置
+# ============================================================================
+server:
+  host: "0.0.0.0"          # 监听地址
+  port: 6088               # 监听端口
+
+# ============================================================================
+# 数据库配置
+# ============================================================================
+database:
+  host: "172.16.1.10"      # 数据库地址
+  port: 3306               # 数据库端口
+  user: "ezpay"            # 用户名
+  password: "Admin3579"    # 密码
+  dbname: "ezpay"          # 数据库名
+  # 连接池配置
+  max_open_conns: 100      # 最大打开连接数
+  max_idle_conns: 10       # 最大空闲连接数
+  conn_max_lifetime: 60    # 连接最大生命周期(分钟)
+
+# ============================================================================
+# JWT 认证配置
+# ============================================================================
+jwt:
+  secret: "change-this-secret-key-in-production"  # JWT签名密钥(请修改!)
+  expire_hour: 24          # Token过期时间(小时)
+
+# ============================================================================
+# 数据存储配置
+# ============================================================================
+storage:
+  # 数据存储目录 (上传文件、APK等)
+  # Linux 默认: /var/lib/ezpay
+  # Windows/macOS 默认: 可执行文件目录/ezpay_data
+  data_dir: ""             # 留空则使用默认值
+
+# ============================================================================
+# 安全配置
+# ============================================================================
+security:
+  # API限流 (基于令牌桶算法)
+  rate_limit_api: 20       # API每秒允许请求数
+  rate_limit_api_burst: 50 # API突发容量
+  rate_limit_login: 2      # 登录接口每秒允许请求数
+  rate_limit_login_burst: 5 # 登录突发容量
+
+  # CORS跨域配置
+  # 留空表示允许所有来源(开发模式)
+  # 生产环境建议配置具体域名，如: ["https://example.com", "https://*.trusted.com"]
+  cors_allow_origins: []
+
+  # IP黑名单缓存时间(秒)
+  ip_blacklist_cache_ttl: 30
+
+  # 外部HTTP请求超时(秒)
+  http_timeout: 15
+
+# ============================================================================
+# 订单配置
+# ============================================================================
+order:
+  expire_minutes: 30       # 订单过期时间(分钟)
+  cleanup_hours: 24        # 自动清理多少小时前的无效订单
+  wallet_cache_ttl: 30     # 钱包地址缓存时间(秒)
+
+# ============================================================================
+# 回调通知配置
+# ============================================================================
+notify:
+  retry_count: 5           # 通知失败重试次数
+  retry_interval: 60       # 重试间隔(秒)
+  timeout: 10              # 通知请求超时(秒)
+
+# ============================================================================
+# 日志配置
+# ============================================================================
+log:
+  level: "info"            # 日志级别: debug, info, warn, error
+  db_log_level: "warn"     # 数据库日志级别
+  api_log_days: 30         # API调用日志保留天数
+
+# ============================================================================
+# 汇率配置
+# ============================================================================
+rate:
+  # 汇率模式
+  # - auto: 自动获取实时汇率
+  # - manual: 使用手动设置的汇率
+  # - hybrid: 优先自动，失败时使用手动汇率
+  mode: "hybrid"
+  manual_rate: 7.2         # 手动汇率 (CNY/USDT)
+  float_percent: 0         # 汇率浮动百分比 (如 0.5 表示浮动0.5%)
+  cache_seconds: 300       # 汇率缓存时间(秒)
+  source: "binance"        # 汇率来源: binance, okx
+
+# ============================================================================
+# 区块链监控配置
+# ============================================================================
+blockchain:
+  # TRX (Tron原生代币)
+  trx:
+    enabled: true
+    rpc: "https://api.trongrid.io"
+    contract_address: ""   # TRX原生代币无需合约地址
+    confirmations: 19      # 确认区块数
+    scan_interval: 15      # 扫描间隔(秒)
+
+  # TRC20 (Tron USDT)
+  trc20:
+    enabled: true
+    rpc: "https://api.trongrid.io"
+    contract_address: "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t"  # USDT合约
+    confirmations: 19
+    scan_interval: 15
+
+  # ERC20 (以太坊 USDT)
+  erc20:
+    enabled: false
+    rpc: "https://mainnet.infura.io/v3/YOUR-PROJECT-ID"  # 需替换为你的Infura项目ID
+    contract_address: "0xdAC17F958D2ee523a2206206994597C13D831ec7"
+    confirmations: 12
+    scan_interval: 15
+
+  # BEP20 (BSC USDT)
+  bep20:
+    enabled: true
+    rpc: "https://bsc-dataseed.binance.org"
+    contract_address: "0x55d398326f99059fF775485246999027B3197955"
+    confirmations: 15
+    scan_interval: 15
+
+  # Polygon USDT
+  polygon:
+    enabled: true
+    rpc: "https://polygon-rpc.com"
+    contract_address: "0xc2132D05D31c914a87C6611C10748AEb04B58e8F"
+    confirmations: 128
+    scan_interval: 15
+
+  # Optimism USDT (Layer2)
+  optimism:
+    enabled: true
+    rpc: "https://mainnet.optimism.io"
+    contract_address: "0x94b008aA00579c1307B0EF2c499aD98a8ce58e58"
+    confirmations: 10
+    scan_interval: 15
+
+  # Arbitrum USDT (Layer2)
+  arbitrum:
+    enabled: true
+    rpc: "https://arb1.arbitrum.io/rpc"
+    contract_address: "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9"
+    confirmations: 10
+    scan_interval: 15
+
+  # Avalanche C-Chain USDT
+  avalanche:
+    enabled: false
+    rpc: "https://api.avax.network/ext/bc/C/rpc"
+    contract_address: "0x9702230A8Ea53601f5cD2dc00fDBc13d4dF4A8c7"
+    confirmations: 12
+    scan_interval: 15
+
+  # Base USDT (Coinbase Layer2)
+  base:
+    enabled: true
+    rpc: "https://mainnet.base.org"
+    contract_address: "0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2"
+    confirmations: 10
+    scan_interval: 15

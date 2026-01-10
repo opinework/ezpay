@@ -1,0 +1,47 @@
+#!/bin/bash
+set -e
+
+case "$1" in
+    configure)
+        # Create ezpay user and group
+        if ! getent group ezpay >/dev/null; then
+            groupadd -r ezpay
+        fi
+        if ! getent passwd ezpay >/dev/null; then
+            useradd -r -g ezpay -d /var/lib/ezpay -s /usr/sbin/nologin -c "EzPay Payment Gateway" ezpay
+        fi
+
+        # Set ownership
+        chown -R ezpay:ezpay /var/lib/ezpay
+        chown -R ezpay:ezpay /var/log/ezpay
+        chown -R ezpay:ezpay /usr/share/ezpay
+
+        # Set config permissions
+        chown ezpay:ezpay /etc/ezpay/config.yaml
+        chmod 600 /etc/ezpay/config.yaml
+
+        # Reload systemd
+        systemctl daemon-reload
+
+        echo "============================================"
+        echo "EzPay installed successfully!"
+        echo ""
+        echo "Please edit /etc/ezpay/config.yaml before starting"
+        echo ""
+        echo "To start:  systemctl start ezpay"
+        echo "To enable: systemctl enable ezpay"
+        echo "============================================"
+        ;;
+
+    abort-upgrade|abort-remove|abort-deconfigure)
+        ;;
+
+    *)
+        echo "postinst called with unknown argument \`$1'" >&2
+        exit 1
+        ;;
+esac
+
+#DEBHELPER#
+
+exit 0

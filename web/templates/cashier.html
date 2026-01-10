@@ -1,0 +1,552 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title data-i18n-document-title="cashier.title">支付 - {{.order.Name}}</title>
+    <link rel="stylesheet" href="/static/css/i18n.css">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+        body.wechat-theme {
+            background: linear-gradient(135deg, #07c160 0%, #059e4e 100%);
+        }
+        body.alipay-theme {
+            background: linear-gradient(135deg, #1677ff 0%, #0958d9 100%);
+        }
+        .container {
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+            max-width: 420px;
+            width: 100%;
+            overflow: hidden;
+        }
+        .top-bar {
+            display: flex;
+            justify-content: flex-end;
+            padding: 8px 16px;
+            background: rgba(0,0,0,0.05);
+        }
+        .header {
+            background: linear-gradient(135deg, #26A17B 0%, #1a8f6a 100%);
+            color: white;
+            padding: 24px;
+            text-align: center;
+        }
+        .header.wechat {
+            background: linear-gradient(135deg, #07c160 0%, #059e4e 100%);
+        }
+        .header.alipay {
+            background: linear-gradient(135deg, #1677ff 0%, #0958d9 100%);
+        }
+        .header h1 {
+            font-size: 20px;
+            margin-bottom: 8px;
+        }
+        .header .amount {
+            font-size: 36px;
+            font-weight: bold;
+        }
+        .header .amount small {
+            font-size: 16px;
+            opacity: 0.9;
+        }
+        .header .cny {
+            font-size: 14px;
+            opacity: 0.8;
+            margin-top: 4px;
+        }
+        .content {
+            padding: 24px;
+        }
+        .chain-info {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            margin-bottom: 20px;
+            padding: 12px;
+            background: #f5f5f5;
+            border-radius: 8px;
+        }
+        .chain-badge {
+            background: #dc3545;
+            color: white;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: bold;
+            text-transform: uppercase;
+        }
+        .chain-badge.wechat {
+            background: #07c160;
+        }
+        .chain-badge.alipay {
+            background: #1677ff;
+        }
+        .qrcode-container {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        .qrcode {
+            width: 200px;
+            height: 200px;
+            margin: 0 auto;
+            background: #f5f5f5;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+        }
+        .qrcode canvas {
+            border-radius: 8px;
+        }
+        .qrcode img {
+            max-width: 100%;
+            max-height: 100%;
+            border-radius: 8px;
+        }
+        .address-container {
+            background: #f9f9f9;
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 20px;
+        }
+        .address-label {
+            font-size: 12px;
+            color: #666;
+            margin-bottom: 8px;
+        }
+        .address {
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            word-break: break-all;
+            color: #333;
+            background: white;
+            padding: 12px;
+            border-radius: 4px;
+            border: 1px solid #e0e0e0;
+            direction: ltr;
+            text-align: left;
+        }
+        .copy-btn {
+            width: 100%;
+            background: #26A17B;
+            color: white;
+            border: none;
+            padding: 14px;
+            border-radius: 8px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: background 0.3s;
+            margin-top: 12px;
+        }
+        .copy-btn.wechat {
+            background: #07c160;
+        }
+        .copy-btn.alipay {
+            background: #1677ff;
+        }
+        .copy-btn:hover {
+            opacity: 0.9;
+        }
+        .copy-btn:active {
+            transform: scale(0.98);
+        }
+        .info-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 12px 0;
+            border-bottom: 1px solid #f0f0f0;
+            font-size: 14px;
+        }
+        .info-row:last-child {
+            border-bottom: none;
+        }
+        .info-label {
+            color: #666;
+        }
+        .info-value {
+            color: #333;
+            font-weight: 500;
+        }
+        .countdown {
+            text-align: center;
+            padding: 16px;
+            background: #fff3cd;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        .countdown-label {
+            font-size: 12px;
+            color: #856404;
+            margin-bottom: 4px;
+        }
+        .countdown-time {
+            font-size: 24px;
+            font-weight: bold;
+            color: #856404;
+            direction: ltr;
+        }
+        .tips {
+            background: #e8f5e9;
+            border-radius: 8px;
+            padding: 16px;
+            margin-top: 20px;
+        }
+        .tips.wechat {
+            background: #e6f7ef;
+        }
+        .tips.alipay {
+            background: #e6f0ff;
+        }
+        .tips h3 {
+            font-size: 14px;
+            color: #2e7d32;
+            margin-bottom: 8px;
+        }
+        .tips.wechat h3 {
+            color: #059e4e;
+        }
+        .tips.alipay h3 {
+            color: #0958d9;
+        }
+        .tips ul {
+            font-size: 12px;
+            color: #558b2f;
+            padding-left: 16px;
+        }
+        [dir="rtl"] .tips ul {
+            padding-left: 0;
+            padding-right: 16px;
+        }
+        .tips.wechat ul {
+            color: #07c160;
+        }
+        .tips.alipay ul {
+            color: #1677ff;
+        }
+        .tips li {
+            margin-bottom: 4px;
+        }
+        .status-checking {
+            text-align: center;
+            padding: 12px;
+            color: #666;
+            font-size: 14px;
+        }
+        .status-checking .spinner {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid #ddd;
+            border-top-color: #26A17B;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-right: 8px;
+            vertical-align: middle;
+        }
+        [dir="rtl"] .status-checking .spinner {
+            margin-right: 0;
+            margin-left: 8px;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        .paid {
+            background: #4caf50;
+            color: white;
+            text-align: center;
+            padding: 20px;
+            border-radius: 8px;
+        }
+        .paid h2 {
+            margin-bottom: 8px;
+        }
+        .expired {
+            background: #f44336;
+            color: white;
+            text-align: center;
+            padding: 20px;
+            border-radius: 8px;
+        }
+        .fiat-notice {
+            background: #fff8e1;
+            border: 1px solid #ffcc80;
+            border-radius: 8px;
+            padding: 12px;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        .fiat-notice p {
+            color: #e65100;
+            font-size: 14px;
+            margin: 0;
+        }
+        .fiat-notice .amount-highlight {
+            font-size: 20px;
+            font-weight: bold;
+            color: #e65100;
+        }
+        /* Language selector in cashier */
+        .top-bar .lang-selector .lang-btn {
+            background: transparent;
+            border: none;
+            color: #666;
+            padding: 4px 8px;
+            font-size: 13px;
+        }
+        .top-bar .lang-selector .lang-btn:hover {
+            color: #333;
+        }
+    </style>
+</head>
+<body class="{{if eq .order.Chain "wechat"}}wechat-theme{{else if eq .order.Chain "alipay"}}alipay-theme{{end}}">
+    <div class="container">
+        <div class="top-bar">
+            <div id="langSelector"></div>
+        </div>
+        <div class="header {{.order.Chain}}">
+            {{if eq .order.Chain "wechat"}}
+            <h1 data-i18n="cashier.wechatPay">微信支付</h1>
+            <div class="amount">¥{{.order.Money}}</div>
+            {{else if eq .order.Chain "alipay"}}
+            <h1 data-i18n="cashier.alipay">支付宝支付</h1>
+            <div class="amount">¥{{.order.Money}}</div>
+            {{else if eq .order.Chain "trx"}}
+            <h1 data-i18n="cashier.trxPay">TRX 支付</h1>
+            <div class="amount">{{.order.USDTAmount}} <small>TRX</small></div>
+            <div class="cny">≈ ¥{{.order.Money}}</div>
+            {{else}}
+            <h1 data-i18n="cashier.usdtPay">USDT 支付</h1>
+            <div class="amount">{{.order.USDTAmount}} <small>USDT</small></div>
+            <div class="cny">≈ ¥{{.order.Money}}</div>
+            {{end}}
+        </div>
+
+        <div class="content" id="payContent">
+            <div class="chain-info">
+                <span id="chainLabel">{{if or (eq .order.Chain "wechat") (eq .order.Chain "alipay")}}支付方式{{else}}网络{{end}}:</span>
+                <span class="chain-badge {{.order.Chain}}" id="chainBadge">
+                    {{if eq .order.Chain "wechat"}}微信支付{{else if eq .order.Chain "alipay"}}支付宝{{else}}{{.order.Chain}}{{end}}
+                </span>
+            </div>
+
+            <div class="countdown">
+                <div class="countdown-label" data-i18n="cashier.remainingTime">剩余支付时间</div>
+                <div class="countdown-time" id="countdown">--:--</div>
+            </div>
+
+            {{if or (eq .order.Chain "wechat") (eq .order.Chain "alipay")}}
+            <!-- 微信/支付宝收款码 -->
+            <div class="fiat-notice">
+                <p id="scanNotice">请使用{{if eq .order.Chain "wechat"}}微信{{else}}支付宝{{end}}扫码支付</p>
+                <p class="amount-highlight">¥{{.order.Money}}</p>
+            </div>
+            <div class="qrcode-container">
+                <div class="qrcode" id="qrcode"></div>
+            </div>
+            {{else}}
+            <!-- USDT 二维码 -->
+            <div class="qrcode-container">
+                <div class="qrcode" id="qrcode"></div>
+            </div>
+
+            <div class="address-container">
+                <div class="address-label" data-i18n="cashier.paymentAddress">收款地址 (请确认网络正确)</div>
+                <div class="address" id="address">{{.order.ToAddress}}</div>
+                <button class="copy-btn" onclick="copyAddress()" data-i18n="cashier.copyAddress">复制地址</button>
+            </div>
+            {{end}}
+
+            <div class="info-row">
+                <span class="info-label" data-i18n="cashier.orderNo">订单号</span>
+                <span class="info-value">{{.order.TradeNo}}</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label" data-i18n="cashier.productName">商品名称</span>
+                <span class="info-value">{{.order.Name}}</span>
+            </div>
+            {{if and (ne .order.Chain "wechat") (ne .order.Chain "alipay")}}
+            <div class="info-row">
+                <span class="info-label" data-i18n="cashier.exchangeRate">汇率</span>
+                <span class="info-value">1 {{if eq .order.Chain "trx"}}TRX{{else}}USDT{{end}} ≈ ¥{{.order.Rate}}</span>
+            </div>
+            {{end}}
+
+            <div class="status-checking">
+                <span class="spinner"></span>
+                <span data-i18n="cashier.waitingPayment">正在等待支付...</span>
+            </div>
+
+            <div class="tips {{.order.Chain}}">
+                <h3 data-i18n="cashier.paymentTips">支付须知</h3>
+                <ul id="tipsList">
+                    {{if eq .order.Chain "wechat"}}
+                    <li data-i18n="cashier.tips.wechat.scan">请使用微信扫描上方二维码</li>
+                    <li><span data-i18n="cashier.tips.wechat.amount">请转账精确金额</span> <strong>¥{{.order.Money}}</strong></li>
+                    <li data-i18n="cashier.tips.wechat.wait">转账完成后请耐心等待确认</li>
+                    {{else if eq .order.Chain "alipay"}}
+                    <li data-i18n="cashier.tips.alipay.scan">请使用支付宝扫描上方二维码</li>
+                    <li><span data-i18n="cashier.tips.alipay.amount">请转账精确金额</span> <strong>¥{{.order.Money}}</strong></li>
+                    <li data-i18n="cashier.tips.alipay.wait">转账完成后请耐心等待确认</li>
+                    {{else if eq .order.Chain "trx"}}
+                    <li><span data-i18n="cashier.tips.crypto.network">请务必确认转账网络为</span> <strong>Tron (TRX)</strong></li>
+                    <li><span data-i18n="cashier.tips.crypto.amount">请转账精确金额</span> <strong>{{.order.USDTAmount}} TRX</strong></li>
+                    <li data-i18n="cashier.tips.crypto.exchangeFee" style="color: #e65100; font-weight: 500;">从交易所提币请将手续费加入转账金额，确保到账金额正确</li>
+                    <li data-i18n="cashier.tips.crypto.wait">转账完成后请耐心等待确认</li>
+                    {{else}}
+                    <li><span data-i18n="cashier.tips.crypto.network">请务必确认转账网络为</span> <strong>{{.order.Chain}}</strong></li>
+                    <li><span data-i18n="cashier.tips.crypto.amount">请转账精确金额</span> <strong>{{.order.USDTAmount}} USDT</strong></li>
+                    <li data-i18n="cashier.tips.crypto.exchangeFee" style="color: #e65100; font-weight: 500;">从交易所提币请将手续费加入转账金额，确保到账金额正确</li>
+                    <li data-i18n="cashier.tips.crypto.wait">转账完成后请耐心等待确认</li>
+                    {{end}}
+                    <li data-i18n="cashier.tips.dontClose">请勿关闭此页面，支付成功将自动跳转</li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="content" id="paidContent" style="display: none;">
+            <div class="paid">
+                <h2 data-i18n="cashier.paymentSuccess">支付成功</h2>
+                <p data-i18n="cashier.redirecting">正在跳转...</p>
+            </div>
+        </div>
+
+        <div class="content" id="expiredContent" style="display: none;">
+            <div class="expired">
+                <h2 data-i18n="cashier.orderExpired">订单已过期</h2>
+                <p data-i18n="cashier.pleaseRetry">请重新发起支付</p>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/qrcode.min.js"></script>
+    <script src="/static/js/i18n.js"></script>
+    <script>
+        const tradeNo = '{{.order.TradeNo}}';
+        const address = '{{.order.ToAddress}}';
+        const chain = '{{.order.Chain}}';
+        const isFiat = chain === 'wechat' || chain === 'alipay';
+
+        // 订单过期时间（毫秒时间戳）从服务器获取
+        const expiredAtMs = {{.expiredAt}};
+        const expiredAt = new Date(expiredAtMs);
+
+        // 初始化国际化
+        I18n.init().then(() => {
+            // 创建语言选择器
+            I18n.createLanguageSelector('langSelector', 'compact light');
+
+            // 更新动态文本
+            updateDynamicTexts();
+        });
+
+        // 监听语言变化
+        window.addEventListener('localeChanged', function() {
+            updateDynamicTexts();
+        });
+
+        // 更新动态文本（不能用 data-i18n 的）
+        function updateDynamicTexts() {
+            const chainLabel = document.getElementById('chainLabel');
+            if (chainLabel) {
+                chainLabel.textContent = isFiat ? $t('cashier.paymentMethod') : $t('cashier.network');
+                chainLabel.textContent += ':';
+            }
+
+            // 更新扫码提示
+            const scanNotice = document.getElementById('scanNotice');
+            if (scanNotice && isFiat) {
+                let text = $t('cashier.scanToPay');
+                scanNotice.textContent = text;
+            }
+        }
+
+        // 生成地址/链接二维码（所有支付方式都需要）
+        if (address) {
+            new QRCode(document.getElementById('qrcode'), {
+                text: address,
+                width: 180,
+                height: 180,
+                colorDark: '#000000',
+                colorLight: '#ffffff',
+                correctLevel: QRCode.CorrectLevel.H
+            });
+        }
+
+        // 复制地址
+        function copyAddress() {
+            navigator.clipboard.writeText(address).then(function() {
+                alert($t('cashier.addressCopied'));
+            }).catch(function() {
+                // 降级方案
+                const input = document.createElement('input');
+                input.value = address;
+                document.body.appendChild(input);
+                input.select();
+                document.execCommand('copy');
+                document.body.removeChild(input);
+                alert($t('cashier.addressCopied'));
+            });
+        }
+
+        // 倒计时
+        function updateCountdown() {
+            const now = new Date();
+            const diff = expiredAt - now;
+
+            if (diff <= 0) {
+                document.getElementById('countdown').textContent = $t('cashier.expired');
+                document.getElementById('payContent').style.display = 'none';
+                document.getElementById('expiredContent').style.display = 'block';
+                return;
+            }
+
+            const minutes = Math.floor(diff / 60000);
+            const seconds = Math.floor((diff % 60000) / 1000);
+            document.getElementById('countdown').textContent =
+                String(minutes).padStart(2, '0') + ':' + String(seconds).padStart(2, '0');
+        }
+
+        updateCountdown();
+        setInterval(updateCountdown, 1000);
+
+        // 轮询检查支付状态
+        function checkStatus() {
+            fetch('/api/check_order?trade_no=' + tradeNo)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.paid) {
+                        document.getElementById('payContent').style.display = 'none';
+                        document.getElementById('paidContent').style.display = 'block';
+
+                        if (data.return_url) {
+                            setTimeout(function() {
+                                window.location.href = data.return_url;
+                            }, 2000);
+                        }
+                    } else if (data.status === 2) {
+                        // 已过期
+                        document.getElementById('payContent').style.display = 'none';
+                        document.getElementById('expiredContent').style.display = 'block';
+                    }
+                })
+                .catch(console.error);
+        }
+
+        // 每3秒检查一次状态
+        setInterval(checkStatus, 3000);
+    </script>
+</body>
+</html>

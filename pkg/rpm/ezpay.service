@@ -1,0 +1,26 @@
+[Unit]
+Description=EzPay Payment Gateway
+Documentation=https://github.com/yourusername/ezpay
+After=network.target mysql.service mariadb.service
+
+[Service]
+Type=simple
+User=ezpay
+Group=ezpay
+WorkingDirectory=/usr/share/ezpay
+ExecStart=/usr/bin/ezpay
+Restart=on-failure
+RestartSec=5
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/ezpay /var/log/ezpay /usr/share/ezpay/web/static/uploads
+
+# Environment
+Environment=GIN_MODE=release
+
+[Install]
+WantedBy=multi-user.target

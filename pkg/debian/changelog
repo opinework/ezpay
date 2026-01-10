@@ -1,0 +1,12 @@
+ezpay (1.0.0-1) stable; urgency=medium
+
+  * Initial release
+  * Multi-chain USDT support (TRC20/ERC20/BEP20/Polygon/Optimism/Arbitrum/Base)
+  * TRX native token support
+  * WeChat and Alipay integration
+  * Automatic exchange rate updates
+  * Wallet rotation for load balancing
+  * Telegram bot notifications
+  * Compatible with Rainbow Epay and VMQ APIs
+
+ -- Your Name <your.email@example.com>  Thu, 02 Jan 2026 00:00:00 +0000

@@ -1,0 +1,79 @@
+# EzPay Docker Configuration
+# Copy this file to config.yaml and modify as needed
+
+server:
+  host: "0.0.0.0"
+  port: 6088
+
+database:
+  host: "mysql"           # Docker service name
+  port: 3306
+  user: "ezpay"
+  password: "ezpay123456"
+  dbname: "ezpay"
+  max_open_conns: 100
+  max_idle_conns: 10
+  conn_max_lifetime: 60
+
+jwt:
+  secret: "change-this-to-a-random-string-in-production"
+  expire_hour: 24
+
+security:
+  rate_limit_api: 20
+  rate_limit_api_burst: 50
+  rate_limit_login: 2
+  rate_limit_login_burst: 5
+  cors_allow_origins: []
+  ip_blacklist_cache_ttl: 30
+  http_timeout: 15
+
+order:
+  expire_minutes: 30
+  cleanup_hours: 24
+  wallet_cache_ttl: 30
+
+notify:
+  retry_count: 5
+  retry_interval: 60
+  timeout: 10
+
+log:
+  level: "info"
+  db_log_level: "warn"
+  api_log_days: 30
+
+rate:
+  mode: "hybrid"
+  manual_rate: 7.2
+  float_percent: 0
+  cache_seconds: 300
+  source: "binance"
+
+blockchain:
+  trc20:
+    enabled: true
+    rpc: "https://api.trongrid.io"
+    contract_address: "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t"
+    confirmations: 19
+    scan_interval: 5
+  erc20:
+    enabled: false
+    rpc: "https://eth.llamarpc.com"
+    contract_address: "0xdAC17F958D2ee523a2206206994597C13D831ec7"
+    confirmations: 12
+    scan_interval: 15
+  bep20:
+    enabled: false
+    rpc: "https://bsc-dataseed.binance.org"
+    contract_address: "0x55d398326f99059fF775485246999027B3197955"
+    confirmations: 15
+    scan_interval: 5
+  trx:
+    enabled: true
+    rpc: "https://api.trongrid.io"
+    confirmations: 19
+    scan_interval: 5
+
+storage:
+  data_dir: "/var/lib/ezpay"

@@ -1,0 +1,566 @@
+{
+  "common": {
+    "appName": "EzPay",
+    "loading": "加载中...",
+    "confirm": "确认",
+    "cancel": "取消",
+    "save": "保存",
+    "delete": "删除",
+    "edit": "编辑",
+    "add": "添加",
+    "search": "搜索",
+    "reset": "重置",
+    "export": "导出",
+    "refresh": "刷新",
+    "close": "关闭",
+    "submit": "提交",
+    "back": "返回",
+    "yes": "是",
+    "no": "否",
+    "success": "成功",
+    "failed": "失败",
+    "error": "错误",
+    "warning": "警告",
+    "info": "提示",
+    "all": "全部",
+    "enable": "启用",
+    "disable": "禁用",
+    "enabled": "已启用",
+    "disabled": "已禁用",
+    "status": "状态",
+    "action": "操作",
+    "copy": "复制",
+    "copied": "已复制",
+    "view": "查看",
+    "detail": "详情",
+    "more": "更多",
+    "total": "共计",
+    "page": "页",
+    "previous": "上一页",
+    "next": "下一页"
+  },
+  "auth": {
+    "login": "登录",
+    "logout": "退出登录",
+    "username": "用户名",
+    "password": "密码",
+    "oldPassword": "旧密码",
+    "newPassword": "新密码",
+    "confirmPassword": "确认密码",
+    "changePassword": "修改密码",
+    "loginSuccess": "登录成功",
+    "loginFailed": "登录失败",
+    "logoutSuccess": "已退出登录",
+    "passwordChanged": "密码修改成功",
+    "passwordMismatch": "两次密码不一致",
+    "invalidCredentials": "用户名或密码错误"
+  },
+  "admin": {
+    "title": "EzPay 管理后台",
+    "dashboard": "仪表盘",
+    "merchants": "商户管理",
+    "wallets": "钱包管理",
+    "orders": "订单管理",
+    "apiLogs": "API日志",
+    "ipBlacklist": "IP黑名单",
+    "withdrawals": "提现管理",
+    "withdrawAddresses": "提现地址审核",
+    "appVersions": "APP版本",
+    "settings": "系统设置",
+    "chains": "链监控",
+    "blockchainStatus": "区块链监听状态"
+  },
+  "adminPage": {
+    "modal": {
+      "title": "标题"
+    },
+    "orders": {
+      "list": "订单列表",
+      "testPayment": "发起测试支付",
+      "exportCSV": "导出CSV",
+      "cleanInvalid": "清理无效订单",
+      "manualConfirm": "手动确认",
+      "retryNotify": "重新通知",
+      "filter": {
+        "allMerchants": "全部商户",
+        "allStatus": "全部状态",
+        "startDate": "开始日期",
+        "endDate": "结束日期"
+      },
+      "tableHeader": {
+        "paymentMethod": "支付方式",
+        "received": "实收"
+      }
+    },
+    "merchants": {
+      "list": "商户列表",
+      "merchantPortal": "商户后台",
+      "addMerchant": "添加商户"
+    },
+    "wallets": {
+      "list": "钱包地址",
+      "tableHeader": {
+        "label": "标签"
+      }
+    },
+    "chains": {
+      "management": "链监控管理",
+      "refreshStatus": "刷新状态",
+      "description": "动态启用或禁用链监控，减少不需要的链的资源开销。",
+      "tableHeader": {
+        "runningStatus": "运行状态",
+        "walletCount": "账号数量",
+        "scanInterval": "扫描间隔"
+      }
+    },
+    "apiLogs": {
+      "cleanLogs": "清理日志:",
+      "oneDayAgo": "一日前",
+      "threeDaysAgo": "三日前",
+      "oneWeekAgo": "一周前",
+      "oneMonthAgo": "一月前",
+      "filter": {
+        "merchantPid": "商户PID",
+        "allEndpoints": "全部接口",
+        "allStatus": "全部状态",
+        "other": "其他",
+        "tradeNo": "订单号"
+      },
+      "tableHeader": {
+        "merchantPid": "商户PID",
+        "message": "消息",
+        "tradeNo": "订单号"
+      }
+    },
+    "settings": {
+      "systemWalletFeeRate": "系统收款码手续费率",
+      "personalWalletFeeRate": "个人收款码手续费率",
+      "feeRatePlaceholder": "如0.02表示2%",
+      "systemWalletFeeRateDesc": "使用系统钱包收款时的手续费率，收款金额扣除手续费后入商户余额",
+      "personalWalletFeeRateDesc": "使用个人钱包收款时的手续费率，收款直接到商户账户，手续费从余额扣除",
+      "telegramBotSettings": "Telegram 机器人设置",
+      "botTokenPlaceholder": "从 @BotFather 获取",
+      "botTokenDesc": "在 Telegram 中搜索 @BotFather，发送 /newbot 创建机器人获取 Token",
+      "botUsername": "Bot 用户名",
+      "botUsernamePlaceholder": "如 @YourBotName",
+      "botUsernameDesc": "机器人的用户名，方便商户查找绑定 (包含@符号)",
+      "customerServiceSettings": "客服链接设置",
+      "telegramService": "Telegram 客服",
+      "telegramServicePlaceholder": "如 https://t.me/your_service",
+      "telegramServiceDesc": "商户充值时显示的客服Telegram链接",
+      "discordService": "Discord 客服",
+      "discordServicePlaceholder": "如 https://discord.gg/xxxxx",
+      "discordServiceDesc": "商户充值时显示的客服Discord链接",
+      "testTelegram": "测试 Telegram 连接"
+    },
+    "withdrawals": {
+      "statusToPay": "待打款",
+      "filter": {
+        "allStatus": "全部状态"
+      },
+      "tableHeader": {
+        "merchant": "商户",
+        "method": "提现方式",
+        "account": "收款账号"
+      }
+    },
+    "withdrawAddresses": {
+      "title": "提现地址审核",
+      "statusPending": "待审核",
+      "statusApproved": "已通过",
+      "statusRejected": "已拒绝",
+      "filter": {
+        "allStatus": "全部状态"
+      },
+      "tableHeader": {
+        "merchant": "商户",
+        "chainType": "链类型",
+        "remark": "备注",
+        "submitTime": "提交时间"
+      }
+    },
+    "appVersions": {
+      "uploadNew": "上传新版本",
+      "tableHeader": {
+        "fileSize": "文件大小",
+        "downloadCount": "下载次数"
+      }
+    },
+    "password": {
+      "oldPasswordPlaceholder": "请输入当前密码",
+      "newPasswordPlaceholder": "请输入新密码(至少6位)",
+      "confirmPasswordPlaceholder": "请再次输入新密码"
+    },
+    "ipBlacklist": {
+      "searchIP": "搜索IP",
+      "tableHeader": {
+        "source": "来源",
+        "addTime": "添加时间"
+      }
+    }
+  },
+  "dashboard": {
+    "todayOrders": "今日订单",
+    "todayUSDT": "今日收款(USDT)",
+    "currentRate": "当前汇率",
+    "pendingOrders": "待支付订单",
+    "dataTrend": "数据趋势",
+    "today": "当日",
+    "week": "1周",
+    "month": "1个月",
+    "threeMonths": "3个月",
+    "ordersTrend": "订单数量趋势",
+    "amountTrend": "交易金额趋势 (CNY)",
+    "topMerchantsByAmount": "商户金额 TOP 5",
+    "topMerchantsByOrders": "商户订单 TOP 5",
+    "rank": "排名",
+    "merchant": "商户",
+    "amount": "交易金额(CNY)",
+    "orderCount": "订单数"
+  },
+  "merchant": {
+    "title": "EzPay 商户后台",
+    "pid": "商户ID",
+    "name": "商户名称",
+    "balance": "余额",
+    "rate": "费率",
+    "status": "状态",
+    "createTime": "创建时间",
+    "apiKey": "API密钥",
+    "resetKey": "重置密钥",
+    "adjustBalance": "调整余额",
+    "walletMode": "钱包模式",
+    "globalWallet": "使用全局钱包",
+    "ownWallet": "使用自有钱包",
+    "notifyUrl": "回调地址",
+    "profile": "个人信息",
+    "myOrders": "我的订单",
+    "myWallets": "我的钱包",
+    "withdrawal": "提现",
+    "recharge": "充值"
+  },
+  "wallet": {
+    "address": "钱包地址",
+    "chain": "链/网络",
+    "merchant": "所属商户",
+    "global": "全局钱包",
+    "qrcode": "收款码",
+    "uploadQrcode": "上传收款码",
+    "addWallet": "添加钱包",
+    "editWallet": "编辑钱包",
+    "deleteConfirm": "确定要删除此钱包吗？"
+  },
+  "order": {
+    "tradeNo": "订单号",
+    "outTradeNo": "商户订单号",
+    "merchantName": "商户",
+    "productName": "商品名称",
+    "amount": "金额(CNY)",
+    "usdtAmount": "金额(USDT)",
+    "chain": "支付通道",
+    "status": "状态",
+    "statusPending": "待支付",
+    "statusPaid": "已支付",
+    "statusExpired": "已过期",
+    "statusClosed": "已关闭",
+    "createTime": "创建时间",
+    "paidTime": "支付时间",
+    "markPaid": "手动确认",
+    "retryNotify": "重发通知",
+    "testOrder": "测试订单",
+    "cleanExpired": "清理过期订单",
+    "notifyStatus": "通知状态",
+    "notifySuccess": "通知成功",
+    "notifyFailed": "通知失败",
+    "notifyPending": "待通知"
+  },
+  "cashier": {
+    "title": "支付",
+    "paymentMethod": "支付方式",
+    "network": "网络",
+    "remainingTime": "剩余支付时间",
+    "expired": "已过期",
+    "scanToPay": "请扫码支付",
+    "paymentAddress": "收款地址 (请确认网络正确)",
+    "copyAddress": "复制地址",
+    "addressCopied": "地址已复制",
+    "orderNo": "订单号",
+    "productName": "商品名称",
+    "exchangeRate": "汇率",
+    "waitingPayment": "正在等待支付...",
+    "paymentSuccess": "支付成功",
+    "redirecting": "正在跳转...",
+    "orderExpired": "订单已过期",
+    "pleaseRetry": "请重新发起支付",
+    "paymentTips": "支付须知",
+    "wechatPay": "微信支付",
+    "alipay": "支付宝支付",
+    "usdtPay": "USDT 支付",
+    "trxPay": "TRX 支付",
+    "tips": {
+      "wechat": {
+        "scan": "请使用微信扫描上方二维码",
+        "amount": "请转账精确金额",
+        "wait": "转账完成后请耐心等待确认"
+      },
+      "alipay": {
+        "scan": "请使用支付宝扫描上方二维码",
+        "amount": "请转账精确金额",
+        "wait": "转账完成后请耐心等待确认"
+      },
+      "crypto": {
+        "network": "请务必确认转账网络为",
+        "amount": "请转账精确金额",
+        "exchangeFee": "从交易所提币请将手续费加入转账金额，确保到账金额正确",
+        "wait": "转账完成后请耐心等待确认"
+      },
+      "dontClose": "请勿关闭此页面，支付成功将自动跳转"
+    }
+  },
+  "withdrawal": {
+    "title": "提现管理",
+    "amount": "提现金额",
+    "address": "提现地址",
+    "chain": "提现网络",
+    "fee": "手续费",
+    "actualAmount": "实际到账",
+    "status": "状态",
+    "statusPending": "待审核",
+    "statusApproved": "已批准",
+    "statusRejected": "已拒绝",
+    "statusCompleted": "已完成",
+    "approve": "批准",
+    "reject": "拒绝",
+    "complete": "完成",
+    "txHash": "交易哈希",
+    "createTime": "申请时间",
+    "processTime": "处理时间",
+    "applyWithdraw": "申请提现",
+    "availableBalance": "可提现余额"
+  },
+  "chain": {
+    "title": "链监控",
+    "name": "链名称",
+    "status": "状态",
+    "running": "运行中",
+    "stopped": "已停止",
+    "lastBlock": "最新区块",
+    "walletCount": "钱包数量",
+    "enable": "启用",
+    "disable": "禁用",
+    "batchEnable": "批量启用",
+    "batchDisable": "批量禁用"
+  },
+  "settings": {
+    "title": "系统设置",
+    "telegram": "Telegram 通知",
+    "botToken": "Bot Token",
+    "testBot": "测试机器人",
+    "rateMode": "汇率模式",
+    "rateAuto": "自动获取",
+    "rateManual": "手动设置",
+    "rateHybrid": "混合模式",
+    "manualRate": "手动汇率",
+    "floatPercent": "汇率浮动百分比",
+    "orderExpire": "订单过期时间(分钟)",
+    "notifyRetry": "通知重试次数",
+    "saveSuccess": "设置保存成功"
+  },
+  "apiLog": {
+    "title": "API调用日志",
+    "ip": "IP地址",
+    "method": "请求方法",
+    "path": "请求路径",
+    "statusCode": "状态码",
+    "duration": "耗时",
+    "time": "时间",
+    "blockIP": "拉黑IP",
+    "clean": "清理日志"
+  },
+  "ipBlacklist": {
+    "title": "IP黑名单",
+    "ip": "IP地址",
+    "reason": "封禁原因",
+    "expireTime": "过期时间",
+    "permanent": "永久",
+    "addIP": "添加IP",
+    "remove": "移除"
+  },
+  "appVersion": {
+    "title": "APP版本管理",
+    "version": "版本号",
+    "versionCode": "版本代码",
+    "description": "更新说明",
+    "forceUpdate": "强制更新",
+    "downloadUrl": "下载地址",
+    "uploadApk": "上传APK",
+    "releaseTime": "发布时间"
+  },
+  "error": {
+    "title": "出错了",
+    "notFound": "页面不存在",
+    "serverError": "服务器错误",
+    "networkError": "网络错误，请重试",
+    "unauthorized": "未授权，请重新登录",
+    "forbidden": "没有权限访问",
+    "invalidParams": "参数错误",
+    "backToHome": "返回首页"
+  },
+  "success": {
+    "title": "操作成功",
+    "message": "您的操作已成功完成",
+    "backToHome": "返回首页"
+  },
+  "time": {
+    "second": "秒",
+    "minute": "分钟",
+    "hour": "小时",
+    "day": "天",
+    "ago": "前",
+    "later": "后"
+  },
+  "merchantPage": {
+    "login": {
+      "pidPlaceholder": "请输入商户PID",
+      "passwordPlaceholder": "请输入密码"
+    },
+    "dashboard": {
+      "todayAmount": "今日金额",
+      "totalOrders": "累计订单",
+      "totalAmount": "累计金额"
+    },
+    "orders": {
+      "paymentPage": "支付页",
+      "confirmPayment": "确认收款"
+    },
+    "pagination": {
+      "items": "条"
+    },
+    "wallets": {
+      "title": "钱包管理",
+      "addWallet": "添加钱包",
+      "usageTitle": "钱包使用说明",
+      "usdtDesc": "系统自动监控链上交易，添加钱包地址后即可收款。支持TRC20、ERC20、BSC等多链。",
+      "wechatAlipayDesc": "需要在手机上安装并运行 VMQ监控App，监控收款通知并自动推送到服务器完成订单匹配。",
+      "chainDisabled": "链路未启用",
+      "unnamed": "未命名"
+    },
+    "chains": {
+      "title": "链路状态",
+      "desc": "链路监控由管理员控制，您只能查看当前状态。禁用的链路将无法收款。"
+    },
+    "apikey": {
+      "title": "API密钥",
+      "pid": "商户PID",
+      "secretKey": "商户密钥",
+      "resetKey": "重置密钥",
+      "resetKeyWarning": "重置密钥后，原密钥将立即失效"
+    },
+    "withdraw": {
+      "title": "提现管理",
+      "balance": "账户余额 (USDT)",
+      "frozenBalance": "冻结金额 (USDT)",
+      "availableBalance": "可提现金额 (USDT)",
+      "recharge": "余额充值",
+      "rechargeDesc": "充值手续费抵扣金额",
+      "instructions": "提现说明",
+      "minWithdraw": "最低提现金额",
+      "feePerTx": "手续费",
+      "perTx": "笔",
+      "feeFixed": "固定",
+      "supportedChains": "支持链路",
+      "addressNeedApproval": "提现地址需先在设置中添加并通过审核",
+      "applyWithdraw": "申请提现",
+      "withdrawAmount": "提现金额 (USDT)",
+      "withdrawAddress": "提现地址",
+      "minAmountHint": "最低50 USDT",
+      "selectAddress": "请选择提现地址",
+      "noAddressHint": "暂无可用地址，请先在设置中添加提现地址",
+      "fullAddress": "完整地址",
+      "remarkOptional": "备注 (可选)",
+      "remarkPlaceholder": "备注信息",
+      "actualReceive": "实际到账",
+      "feeAmount": "手续费",
+      "submitApply": "提交申请",
+      "withdrawHistory": "提现记录",
+      "noRecords": "暂无提现记录"
+    },
+    "settings": {
+      "title": "商户设置",
+      "basicInfo": "基本信息",
+      "merchantName": "商户名称",
+      "contactEmail": "联系邮箱",
+      "asyncNotifyUrl": "异步通知URL",
+      "syncReturnUrl": "同步跳转URL",
+      "saveChanges": "保存修改",
+      "changePassword": "修改密码",
+      "currentPassword": "当前密码",
+      "newPassword": "新密码",
+      "walletMode": "钱包模式",
+      "walletModeDesc": "选择收款时使用的钱包类型",
+      "systemWalletOnly": "仅系统钱包",
+      "systemWalletDesc": "只使用管理员配置的系统钱包收款",
+      "personalWalletOnly": "仅个人钱包",
+      "personalWalletDesc": "只使用您自己添加的钱包收款",
+      "bothWallets": "两者同时使用 (推荐)",
+      "bothWalletsDesc": "优先使用个人钱包，无可用时自动使用系统钱包",
+      "separateBilling": "分别计费",
+      "byActualUsage": "按实际使用",
+      "feeRate": "手续费率",
+      "feeExplanation": "手续费说明",
+      "systemWalletFeeDesc": "收款扣除手续费后入账到您的余额",
+      "personalWalletFeeDesc": "收款直接到您的账户，手续费从余额扣除",
+      "mixedModeFeeDesc": "根据实际使用的钱包类型分别计费",
+      "saveWalletMode": "保存钱包模式",
+      "telegramNotify": "Telegram通知",
+      "telegramBound": "已绑定Telegram",
+      "telegramNotEnabled": "Telegram通知未启用",
+      "telegramNotEnabledDesc": "管理员尚未配置Telegram机器人，暂时无法使用此功能。",
+      "telegramNotBound": "未绑定Telegram",
+      "telegramBindBenefit": "绑定后可接收订单、提现等实时通知。",
+      "bindMethod": "绑定方法",
+      "notifySettings": "通知设置",
+      "orderCreatedNotify": "订单创建通知",
+      "orderPaidNotify": "订单支付成功通知",
+      "withdrawNotify": "提现状态通知",
+      "saveNotifySettings": "保存通知设置",
+      "withdrawAddress": "提现地址管理",
+      "addWithdrawAddress": "添加提现地址",
+      "chainType": "链类型",
+      "address": "地址",
+      "label": "标签",
+      "labelPlaceholder": "可选，如：主账户",
+      "submitForReview": "提交审核",
+      "yourAddresses": "您的提现地址",
+      "noAddressYet": "暂无提现地址",
+      "addFirstAddress": "添加第一个地址"
+    },
+    "testPayment": {
+      "title": "发起测试支付",
+      "amount": "金额",
+      "productName": "商品名称",
+      "paymentMethod": "支付方式",
+      "submit": "创建订单"
+    },
+    "recharge": {
+      "title": "余额充值",
+      "desc": "充值金额将添加到您的账户余额，可用于抵扣手续费。",
+      "selectChain": "选择充值网络",
+      "rechargeAddress": "充值地址",
+      "copyAddress": "复制地址",
+      "minRecharge": "最低充值金额",
+      "rechargeNotice": "充值须知",
+      "notice1": "请确保转账网络正确，转错无法找回",
+      "notice2": "充值金额需等待区块确认后到账",
+      "notice3": "如有问题请联系客服",
+      "contactSupport": "联系客服"
+    },
+    "status": {
+      "enabled": "已启用",
+      "disabled": "已禁用",
+      "pending": "待审核",
+      "approved": "已通过",
+      "rejected": "已拒绝"
+    }
+  }
+}

@@ -1,0 +1,2315 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title data-i18n-document-title="admin.title">EzPay 管理后台</title>
+    <link rel="stylesheet" href="/static/css/fontawesome.min.css">
+    <link rel="stylesheet" href="/static/css/i18n.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f7fa; }
+        .login-container { min-height: 100vh; display: flex; justify-content: center; align-items: center; }
+        .login-box { background: white; padding: 40px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); width: 360px; }
+        .login-box h1 { text-align: center; color: #333; margin-bottom: 30px; }
+        .form-group { margin-bottom: 20px; }
+        .form-group label { display: block; margin-bottom: 8px; color: #666; font-size: 14px; }
+        .form-group input { width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 14px; }
+        .form-group input:focus { outline: none; border-color: #667eea; }
+        .login-btn { width: 100%; padding: 14px; background: linear-gradient(135deg, #667eea, #764ba2); color: white; border: none; border-radius: 8px; font-size: 16px; cursor: pointer; }
+        .login-btn:hover { opacity: 0.9; }
+
+        /* Dashboard styles */
+        .app-container { display: none; }
+        .sidebar { position: fixed; left: 0; top: 0; width: 240px; height: 100vh; background: #1a1a2e; color: white; }
+        .sidebar-header { padding: 20px; border-bottom: 1px solid rgba(255,255,255,0.1); }
+        .sidebar-header h2 { font-size: 20px; }
+        .sidebar-menu { padding: 20px 0; }
+        .menu-item { display: flex; align-items: center; padding: 12px 20px; color: rgba(255,255,255,0.7); text-decoration: none; transition: all 0.3s; cursor: pointer; }
+        .menu-item:hover, .menu-item.active { background: rgba(255,255,255,0.1); color: white; }
+        .menu-icon { width: 20px; margin-right: 12px; text-align: center; font-size: 16px; }
+        .main-content { margin-left: 240px; padding: 20px; }
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+        .header h1 { font-size: 24px; color: #333; }
+        .logout-btn { padding: 8px 16px; background: #f44336; color: white; border: none; border-radius: 4px; cursor: pointer; }
+
+        .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; margin-bottom: 20px; }
+        .stat-card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); }
+        .stat-card h3 { font-size: 14px; color: #666; margin-bottom: 8px; }
+        .stat-card .value { font-size: 28px; font-weight: bold; color: #333; }
+        .stat-card .sub { font-size: 12px; color: #999; margin-top: 4px; }
+
+        .card { background: white; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); margin-bottom: 20px; }
+        .card-header { padding: 16px 20px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center; }
+        .card-header h2 { font-size: 16px; color: #333; }
+        .card-body { padding: 20px; }
+
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 12px; text-align: left; border-bottom: 1px solid #eee; }
+        th { background: #f9f9f9; font-weight: 600; color: #666; font-size: 13px; }
+        td { font-size: 14px; color: #333; }
+        .badge { display: inline-block; padding: 4px 8px; border-radius: 4px; font-size: 12px; }
+        .badge-success { background: #e8f5e9; color: #2e7d32; }
+        .badge-warning { background: #fff3e0; color: #e65100; }
+        .badge-danger { background: #ffebee; color: #c62828; }
+
+        .btn { padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; }
+        .btn-primary { background: #667eea; color: white; }
+        .btn-sm { padding: 4px 8px; font-size: 12px; }
+
+        .page { display: none; }
+        .page.active { display: block; }
+
+        .form-row { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; margin-bottom: 20px; }
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); justify-content: center; align-items: center; z-index: 1000; }
+        .modal.show { display: flex; }
+        .modal-content { background: white; border-radius: 12px; padding: 24px; width: 480px; max-width: 90%; }
+        .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+        .modal-close { background: none; border: none; font-size: 24px; cursor: pointer; color: #999; }
+
+        /* Filter form styles */
+        .filter-bar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 16px; }
+        .filter-bar input, .filter-bar select { padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; }
+        .filter-bar input:focus, .filter-bar select:focus { outline: none; border-color: #667eea; }
+        .filter-bar input { min-width: 120px; }
+        .filter-bar select { min-width: 100px; background: white; }
+        .trend-period { background: #f3f4f6; color: #374151; border: none; }
+        .trend-period.active { background: #667eea; color: white; }
+        .trend-period:hover { opacity: 0.9; }
+    </style>
+</head>
+<body>
+    <!-- Login -->
+    <div class="login-container" id="loginContainer">
+        <div class="login-box">
+            <div style="text-align:right;margin-bottom:16px;"><div id="loginLangSelector"></div></div>
+            <h1 data-i18n="admin.title">EzPay 管理后台</h1>
+            <form onsubmit="login(event)">
+                <div class="form-group">
+                    <label data-i18n="auth.username">用户名</label>
+                    <input type="text" id="username" required>
+                </div>
+                <div class="form-group">
+                    <label data-i18n="auth.password">密码</label>
+                    <input type="password" id="password" required>
+                </div>
+                <button type="submit" class="login-btn" data-i18n="auth.login">登录</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- App -->
+    <div class="app-container" id="appContainer">
+        <div class="sidebar">
+            <div class="sidebar-header">
+                <h2>EzPay</h2>
+            </div>
+            <nav class="sidebar-menu">
+                <a class="menu-item active" data-page="dashboard"><span class="menu-icon"><i class="fas fa-chart-line"></i></span><span data-i18n="admin.dashboard">仪表盘</span></a>
+                <a class="menu-item" data-page="chains"><span class="menu-icon"><i class="fas fa-link"></i></span><span data-i18n="admin.chains">链监控</span></a>
+                <a class="menu-item" data-page="merchants"><span class="menu-icon"><i class="fas fa-store"></i></span><span data-i18n="admin.merchants">商户管理</span></a>
+                <a class="menu-item" data-page="wallets"><span class="menu-icon"><i class="fas fa-wallet"></i></span><span data-i18n="admin.wallets">钱包管理</span></a>
+                <a class="menu-item" data-page="orders"><span class="menu-icon"><i class="fas fa-file-invoice"></i></span><span data-i18n="admin.orders">订单管理</span></a>
+                <a class="menu-item" data-page="api-logs"><span class="menu-icon"><i class="fas fa-history"></i></span><span data-i18n="admin.apiLogs">API日志</span></a>
+                <a class="menu-item" data-page="ip-blacklist"><span class="menu-icon"><i class="fas fa-ban"></i></span><span data-i18n="admin.ipBlacklist">IP黑名单</span></a>
+                <a class="menu-item" data-page="withdrawals"><span class="menu-icon"><i class="fas fa-money-bill-transfer"></i></span><span data-i18n="admin.withdrawals">提现管理</span></a>
+                <a class="menu-item" data-page="withdraw-addresses"><span class="menu-icon"><i class="fas fa-address-card"></i></span><span data-i18n="admin.withdrawAddresses">提现地址审核</span></a>
+                <a class="menu-item" data-page="app-versions"><span class="menu-icon"><i class="fas fa-mobile-alt"></i></span><span data-i18n="admin.appVersions">APP版本</span></a>
+                <a class="menu-item" data-page="settings"><span class="menu-icon"><i class="fas fa-cog"></i></span><span data-i18n="admin.settings">系统设置</span></a>
+                <a class="menu-item" data-page="password"><span class="menu-icon"><i class="fas fa-key"></i></span><span data-i18n="auth.changePassword">修改密码</span></a>
+            </nav>
+        </div>
+
+        <div class="main-content">
+            <div class="header">
+                <h1 id="pageTitle" data-i18n="admin.dashboard">仪表盘</h1>
+                <div style="display:flex;align-items:center;gap:16px;">
+                    <div id="headerLangSelector"></div>
+                    <button class="logout-btn" onclick="logout()" data-i18n="auth.logout">退出登录</button>
+                </div>
+            </div>
+
+            <!-- Dashboard Page -->
+            <div class="page active" id="page-dashboard">
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <h3 data-i18n="dashboard.todayOrders">今日订单</h3>
+                        <div class="value" id="todayOrders">0</div>
+                    </div>
+                    <div class="stat-card">
+                        <h3 data-i18n="dashboard.todayUSDT">今日收款(USDT)</h3>
+                        <div class="value" id="todayUSDT">0</div>
+                    </div>
+                    <div class="stat-card">
+                        <h3 data-i18n="dashboard.currentRate">当前汇率</h3>
+                        <div class="value" id="currentRate">0</div>
+                    </div>
+                    <div class="stat-card">
+                        <h3 data-i18n="dashboard.pendingOrders">待支付订单</h3>
+                        <div class="value" id="pendingOrders">0</div>
+                    </div>
+                </div>
+
+                <!-- 趋势图 -->
+                <div class="card">
+                    <div class="card-header">
+                        <h2 data-i18n="dashboard.dataTrend">数据趋势</h2>
+                        <div style="display:flex;gap:8px;">
+                            <button class="btn btn-sm trend-period active" data-period="today" onclick="changeTrendPeriod('today')" data-i18n="dashboard.today">当日</button>
+                            <button class="btn btn-sm trend-period" data-period="week" onclick="changeTrendPeriod('week')" data-i18n="dashboard.week">1周</button>
+                            <button class="btn btn-sm trend-period" data-period="month" onclick="changeTrendPeriod('month')" data-i18n="dashboard.month">1个月</button>
+                            <button class="btn btn-sm trend-period" data-period="3months" onclick="changeTrendPeriod('3months')" data-i18n="dashboard.threeMonths">3个月</button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
+                            <div>
+                                <h4 style="color:#666;font-size:14px;margin-bottom:12px;" data-i18n="dashboard.ordersTrend">订单数量趋势</h4>
+                                <div style="height:250px;"><canvas id="ordersChart"></canvas></div>
+                            </div>
+                            <div>
+                                <h4 style="color:#666;font-size:14px;margin-bottom:12px;" data-i18n="dashboard.amountTrend">交易金额趋势 (CNY)</h4>
+                                <div style="height:250px;"><canvas id="amountChart"></canvas></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 商户排行 -->
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:20px;">
+                    <div class="card">
+                        <div class="card-header">
+                            <h2 data-i18n="dashboard.topMerchantsByAmount">商户金额 TOP 5</h2>
+                        </div>
+                        <div class="card-body">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th data-i18n="dashboard.rank">排名</th>
+                                        <th data-i18n="dashboard.merchant">商户</th>
+                                        <th data-i18n="dashboard.amount">交易金额(CNY)</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="topAmountTable"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div class="card">
+                        <div class="card-header">
+                            <h2 data-i18n="dashboard.topMerchantsByOrders">商户订单 TOP 5</h2>
+                        </div>
+                        <div class="card-body">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th data-i18n="dashboard.rank">排名</th>
+                                        <th data-i18n="dashboard.merchant">商户</th>
+                                        <th data-i18n="dashboard.orderCount">订单数</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="topCountTable"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <h2 data-i18n="admin.blockchainStatus">区块链监听状态</h2>
+                    </div>
+                    <div class="card-body" id="blockchainStatus">
+                        <span data-i18n="common.loading">加载中...</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Orders Page -->
+            <div class="page" id="page-orders">
+                <div class="card">
+                    <div class="card-header">
+                        <h2 data-i18n="adminPage.orders.list">订单列表</h2>
+                        <button class="btn btn-primary btn-sm" onclick="showTestPayment()" data-i18n="adminPage.orders.testPayment">发起测试支付</button>
+                    </div>
+                    <div class="card-body">
+                        <div class="filter-bar">
+                            <select id="orderMerchantFilter" onchange="loadOrders()">
+                                <option value="" data-i18n="adminPage.orders.filter.allMerchants">全部商户</option>
+                            </select>
+                            <select id="orderStatusFilter" onchange="loadOrders()">
+                                <option value="" data-i18n="adminPage.orders.filter.allStatus">全部状态</option>
+                                <option value="0" data-i18n="order.statusPending">待支付</option>
+                                <option value="1" data-i18n="order.statusPaid">已支付</option>
+                                <option value="2" data-i18n="order.statusExpired">已过期</option>
+                                <option value="3" data-i18n="order.statusClosed">已取消</option>
+                            </select>
+                            <input type="date" id="orderStartDate" data-i18n-placeholder="adminPage.orders.filter.startDate">
+                            <input type="date" id="orderEndDate" data-i18n-placeholder="adminPage.orders.filter.endDate">
+                            <button class="btn btn-primary btn-sm" onclick="loadOrders()" data-i18n="common.search">搜索</button>
+                            <button class="btn btn-sm" style="background:#28a745;color:#fff;" onclick="exportOrders()" data-i18n="adminPage.orders.exportCSV">导出CSV</button>
+                            <button class="btn btn-sm" style="background:#dc3545;color:#fff;" onclick="cleanInvalidOrders()" data-i18n="adminPage.orders.cleanInvalid">清理无效订单</button>
+                        </div>
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th data-i18n="order.tradeNo">订单号</th>
+                                    <th data-i18n="order.merchantName">商户</th>
+                                    <th data-i18n="adminPage.orders.tableHeader.paymentMethod">支付方式</th>
+                                    <th data-i18n="order.outTradeNo">商户订单号</th>
+                                    <th data-i18n="order.amount">金额(CNY)</th>
+                                    <th data-i18n="adminPage.orders.tableHeader.received">实收</th>
+                                    <th data-i18n="common.status">状态</th>
+                                    <th data-i18n="order.createTime">创建时间</th>
+                                    <th data-i18n="common.action">操作</th>
+                                </tr>
+                            </thead>
+                            <tbody id="ordersTable">
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Merchants Page -->
+            <div class="page" id="page-merchants">
+                <div class="card">
+                    <div class="card-header">
+                        <h2 data-i18n="adminPage.merchants.list">商户列表</h2>
+                        <div style="display:flex;gap:8px;">
+                            <a href="/merchant" target="_blank" class="btn btn-sm" style="background:#e0f2fe;color:#0369a1;border:1px solid #7dd3fc;"><i class="fas fa-external-link-alt"></i> <span data-i18n="adminPage.merchants.merchantPortal">商户后台</span></a>
+                            <button class="btn btn-primary btn-sm" onclick="showAddMerchant()" data-i18n="adminPage.merchants.addMerchant">添加商户</button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th data-i18n="merchant.pid">PID</th>
+                                    <th data-i18n="merchant.name">名称</th>
+                                    <th data-i18n="merchant.balance">余额(USDT)</th>
+                                    <th data-i18n="common.status">状态</th>
+                                    <th data-i18n="merchant.createTime">创建时间</th>
+                                    <th data-i18n="common.action">操作</th>
+                                </tr>
+                            </thead>
+                            <tbody id="merchantsTable">
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Wallets Page -->
+            <div class="page" id="page-wallets">
+                <div class="card">
+                    <div class="card-header">
+                        <h2 data-i18n="adminPage.wallets.list">钱包地址</h2>
+                        <button class="btn btn-primary btn-sm" onclick="showAddWallet()" data-i18n="wallet.addWallet">添加钱包</button>
+                    </div>
+                    <div class="card-body">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th data-i18n="wallet.merchant">商户</th>
+                                    <th data-i18n="wallet.chain">链</th>
+                                    <th data-i18n="wallet.address">地址</th>
+                                    <th data-i18n="adminPage.wallets.tableHeader.label">标签</th>
+                                    <th data-i18n="common.status">状态</th>
+                                    <th data-i18n="common.action">操作</th>
+                                </tr>
+                            </thead>
+                            <tbody id="walletsTable">
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Chains Page -->
+            <div class="page" id="page-chains">
+                <div class="card">
+                    <div class="card-header">
+                        <h2 data-i18n="adminPage.chains.management">链监控管理</h2>
+                        <button class="btn btn-primary btn-sm" onclick="loadChains()" data-i18n="adminPage.chains.refreshStatus">刷新状态</button>
+                    </div>
+                    <div class="card-body">
+                        <p style="color:#666;margin-bottom:16px;" data-i18n="adminPage.chains.description">动态启用或禁用链监控，减少不需要的链的资源开销。</p>
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th data-i18n="chain.name">链</th>
+                                    <th data-i18n="common.status">状态</th>
+                                    <th data-i18n="adminPage.chains.tableHeader.runningStatus">运行状态</th>
+                                    <th data-i18n="adminPage.chains.tableHeader.walletCount">账号数量</th>
+                                    <th data-i18n="adminPage.chains.tableHeader.scanInterval">扫描间隔</th>
+                                    <th data-i18n="common.action">操作</th>
+                                </tr>
+                            </thead>
+                            <tbody id="chainsTable">
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- API Logs Page -->
+            <div class="page" id="page-api-logs">
+                <div class="card">
+                    <div class="card-header">
+                        <h2 data-i18n="apiLog.title">API调用日志</h2>
+                    </div>
+                    <div class="card-body">
+                        <div class="filter-bar">
+                            <input type="text" id="apiLogMerchantPid" data-i18n-placeholder="adminPage.apiLogs.filter.merchantPid">
+                            <select id="apiLogEndpoint">
+                                <option value="" data-i18n="adminPage.apiLogs.filter.allEndpoints">全部接口</option>
+                                <option value="/submit.php">submit.php</option>
+                                <option value="/mapi.php">mapi.php</option>
+                                <option value="/api.php">api.php</option>
+                                <option value="/createOrder">createOrder</option>
+                                <option value="/appPush">appPush</option>
+                            </select>
+                            <select id="apiLogResponseCode">
+                                <option value="" data-i18n="adminPage.apiLogs.filter.allStatus">全部状态</option>
+                                <option value="1" data-i18n="common.success">成功</option>
+                                <option value="-1" data-i18n="common.failed">失败</option>
+                                <option value="0" data-i18n="adminPage.apiLogs.filter.other">其他</option>
+                            </select>
+                            <input type="text" id="apiLogTradeNo" data-i18n-placeholder="adminPage.apiLogs.filter.tradeNo">
+                            <button class="btn btn-primary btn-sm" onclick="loadAPILogs()" data-i18n="common.search">搜索</button>
+                            <span style="margin-left:20px;color:#666;" data-i18n="adminPage.apiLogs.cleanLogs">清理日志:</span>
+                            <button class="btn btn-sm" style="background:#dc3545;color:#fff;" onclick="cleanAPILogs(1)" data-i18n="adminPage.apiLogs.oneDayAgo">一日前</button>
+                            <button class="btn btn-sm" style="background:#dc3545;color:#fff;" onclick="cleanAPILogs(3)" data-i18n="adminPage.apiLogs.threeDaysAgo">三日前</button>
+                            <button class="btn btn-sm" style="background:#dc3545;color:#fff;" onclick="cleanAPILogs(7)" data-i18n="adminPage.apiLogs.oneWeekAgo">一周前</button>
+                            <button class="btn btn-sm" style="background:#dc3545;color:#fff;" onclick="cleanAPILogs(30)" data-i18n="adminPage.apiLogs.oneMonthAgo">一月前</button>
+                        </div>
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th data-i18n="apiLog.time">时间</th>
+                                    <th data-i18n="adminPage.apiLogs.tableHeader.merchantPid">商户PID</th>
+                                    <th data-i18n="apiLog.path">接口</th>
+                                    <th data-i18n="apiLog.method">方法</th>
+                                    <th data-i18n="apiLog.ip">IP</th>
+                                    <th data-i18n="common.status">状态</th>
+                                    <th data-i18n="adminPage.apiLogs.tableHeader.message">消息</th>
+                                    <th data-i18n="adminPage.apiLogs.tableHeader.tradeNo">订单号</th>
+                                    <th data-i18n="apiLog.duration">耗时</th>
+                                    <th data-i18n="common.action">操作</th>
+                                </tr>
+                            </thead>
+                            <tbody id="apiLogsTable"></tbody>
+                        </table>
+                        <div class="pagination" id="apiLogsPagination"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Settings Page -->
+            <div class="page" id="page-settings">
+                <div class="card">
+                    <div class="card-header">
+                        <h2 data-i18n="settings.title">系统设置</h2>
+                    </div>
+                    <div class="card-body">
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label data-i18n="settings.rateMode">汇率模式</label>
+                                <select id="cfg_rate_mode" style="width:100%;padding:12px;border:1px solid #ddd;border-radius:8px;">
+                                    <option value="auto" data-i18n="settings.rateAuto">自动获取</option>
+                                    <option value="manual" data-i18n="settings.rateManual">手动设置</option>
+                                    <option value="hybrid" data-i18n="settings.rateHybrid">混合模式</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label data-i18n="settings.manualRate">手动汇率</label>
+                                <input type="text" id="cfg_manual_rate">
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label data-i18n="settings.orderExpire">订单过期时间(分钟)</label>
+                                <input type="text" id="cfg_order_expire">
+                            </div>
+                            <div class="form-group">
+                                <label data-i18n="settings.notifyRetry">通知重试次数</label>
+                                <input type="text" id="cfg_notify_retry">
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label data-i18n="adminPage.settings.systemWalletFeeRate">系统收款码手续费率</label>
+                                <input type="text" id="cfg_system_wallet_fee_rate" data-i18n-placeholder="adminPage.settings.feeRatePlaceholder">
+                                <small style="color:#666;font-size:12px;" data-i18n="adminPage.settings.systemWalletFeeRateDesc">使用系统钱包收款时的手续费率，收款金额扣除手续费后入商户余额</small>
+                            </div>
+                            <div class="form-group">
+                                <label data-i18n="adminPage.settings.personalWalletFeeRate">个人收款码手续费率</label>
+                                <input type="text" id="cfg_personal_wallet_fee_rate" data-i18n-placeholder="adminPage.settings.feeRatePlaceholder">
+                                <small style="color:#666;font-size:12px;" data-i18n="adminPage.settings.personalWalletFeeRateDesc">使用个人钱包收款时的手续费率，收款直接到商户账户，手续费从余额扣除</small>
+                            </div>
+                        </div>
+
+                        <h3 style="margin-top:24px;margin-bottom:16px;color:#333;border-bottom:1px solid #eee;padding-bottom:8px;" data-i18n="adminPage.settings.telegramBotSettings">Telegram 机器人设置</h3>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label data-i18n="settings.botToken">Bot Token</label>
+                                <input type="text" id="cfg_telegram_bot_token" data-i18n-placeholder="adminPage.settings.botTokenPlaceholder">
+                                <small style="color:#666;font-size:12px;" data-i18n="adminPage.settings.botTokenDesc">在 Telegram 中搜索 @BotFather，发送 /newbot 创建机器人获取 Token</small>
+                            </div>
+                            <div class="form-group">
+                                <label data-i18n="adminPage.settings.botUsername">Bot 用户名</label>
+                                <input type="text" id="cfg_telegram_bot_username" data-i18n-placeholder="adminPage.settings.botUsernamePlaceholder">
+                                <small style="color:#666;font-size:12px;" data-i18n="adminPage.settings.botUsernameDesc">机器人的用户名，方便商户查找绑定 (包含@符号)</small>
+                            </div>
+                        </div>
+                        <div id="telegramStatus" style="margin-bottom:16px;padding:12px;border-radius:8px;background:#f5f5f5;display:none;">
+                            <span id="telegramStatusIcon"></span>
+                            <span id="telegramStatusText"></span>
+                        </div>
+
+                        <h3 style="margin-top:24px;margin-bottom:16px;color:#333;border-bottom:1px solid #eee;padding-bottom:8px;" data-i18n="adminPage.settings.customerServiceSettings">客服链接设置</h3>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label data-i18n="adminPage.settings.telegramService">Telegram 客服</label>
+                                <input type="text" id="cfg_service_telegram" data-i18n-placeholder="adminPage.settings.telegramServicePlaceholder">
+                                <small style="color:#666;font-size:12px;" data-i18n="adminPage.settings.telegramServiceDesc">商户充值时显示的客服Telegram链接</small>
+                            </div>
+                            <div class="form-group">
+                                <label data-i18n="adminPage.settings.discordService">Discord 客服</label>
+                                <input type="text" id="cfg_service_discord" data-i18n-placeholder="adminPage.settings.discordServicePlaceholder">
+                                <small style="color:#666;font-size:12px;" data-i18n="adminPage.settings.discordServiceDesc">商户充值时显示的客服Discord链接</small>
+                            </div>
+                        </div>
+
+                        <button class="btn btn-primary" onclick="saveSettings()" data-i18n="common.save">保存设置</button>
+                        <button class="btn" style="margin-left:10px;background:#17a2b8;color:white;" onclick="testTelegramBot()" data-i18n="adminPage.settings.testTelegram">测试 Telegram 连接</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Withdrawals Page -->
+            <div class="page" id="page-withdrawals">
+                <div class="card">
+                    <div class="card-header">
+                        <h2 data-i18n="withdrawal.title">提现管理</h2>
+                    </div>
+                    <div class="card-body">
+                        <div class="filter-bar">
+                            <select id="withdrawalStatusFilter">
+                                <option value="" data-i18n="adminPage.withdrawals.filter.allStatus">全部状态</option>
+                                <option value="0" data-i18n="withdrawal.statusPending">待审核</option>
+                                <option value="1" data-i18n="adminPage.withdrawals.statusToPay">待打款</option>
+                                <option value="2" data-i18n="withdrawal.statusRejected">已拒绝</option>
+                                <option value="3" data-i18n="withdrawal.statusCompleted">已完成</option>
+                            </select>
+                            <button class="btn btn-primary btn-sm" onclick="loadWithdrawals()" data-i18n="common.search">搜索</button>
+                        </div>
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>ID</th>
+                                    <th data-i18n="adminPage.withdrawals.tableHeader.merchant">商户</th>
+                                    <th data-i18n="withdrawal.amount">提现金额</th>
+                                    <th data-i18n="withdrawal.fee">手续费</th>
+                                    <th data-i18n="withdrawal.actualAmount">实际到账</th>
+                                    <th data-i18n="adminPage.withdrawals.tableHeader.method">提现方式</th>
+                                    <th data-i18n="adminPage.withdrawals.tableHeader.account">收款账号</th>
+                                    <th data-i18n="common.status">状态</th>
+                                    <th data-i18n="withdrawal.createTime">申请时间</th>
+                                    <th data-i18n="common.action">操作</th>
+                                </tr>
+                            </thead>
+                            <tbody id="withdrawalsTable"></tbody>
+                        </table>
+                        <div class="pagination" id="withdrawalsPagination"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Withdraw Addresses Page -->
+            <div class="page" id="page-withdraw-addresses">
+                <div class="card">
+                    <div class="card-header">
+                        <h2 data-i18n="adminPage.withdrawAddresses.title">提现地址审核</h2>
+                    </div>
+                    <div class="card-body">
+                        <div class="filter-bar">
+                            <select id="addressStatusFilter">
+                                <option value="" data-i18n="adminPage.withdrawAddresses.filter.allStatus">全部状态</option>
+                                <option value="0" data-i18n="adminPage.withdrawAddresses.statusPending">待审核</option>
+                                <option value="1" data-i18n="adminPage.withdrawAddresses.statusApproved">已通过</option>
+                                <option value="2" data-i18n="adminPage.withdrawAddresses.statusRejected">已拒绝</option>
+                            </select>
+                            <button class="btn btn-primary btn-sm" onclick="loadWithdrawAddresses()" data-i18n="common.search">搜索</button>
+                        </div>
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>ID</th>
+                                    <th data-i18n="adminPage.withdrawAddresses.tableHeader.merchant">商户</th>
+                                    <th data-i18n="adminPage.withdrawAddresses.tableHeader.chainType">链类型</th>
+                                    <th data-i18n="wallet.address">地址</th>
+                                    <th data-i18n="adminPage.withdrawAddresses.tableHeader.remark">备注</th>
+                                    <th data-i18n="common.status">状态</th>
+                                    <th data-i18n="adminPage.withdrawAddresses.tableHeader.submitTime">提交时间</th>
+                                    <th data-i18n="common.action">操作</th>
+                                </tr>
+                            </thead>
+                            <tbody id="withdrawAddressesTable"></tbody>
+                        </table>
+                        <div class="pagination" id="withdrawAddressesPagination"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- APP版本管理 Page -->
+            <div class="page" id="page-app-versions">
+                <div class="card">
+                    <div class="card-header">
+                        <h2 data-i18n="appVersion.title">APP版本管理</h2>
+                        <button class="btn btn-primary" onclick="showUploadAppModal()" data-i18n="adminPage.appVersions.uploadNew">上传新版本</button>
+                    </div>
+                    <div class="card-body">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th data-i18n="appVersion.versionCode">版本号</th>
+                                    <th data-i18n="appVersion.version">版本名</th>
+                                    <th data-i18n="adminPage.appVersions.tableHeader.fileSize">文件大小</th>
+                                    <th data-i18n="adminPage.appVersions.tableHeader.downloadCount">下载次数</th>
+                                    <th data-i18n="appVersion.forceUpdate">强制更新</th>
+                                    <th data-i18n="common.status">状态</th>
+                                    <th data-i18n="appVersion.releaseTime">上传时间</th>
+                                    <th data-i18n="common.action">操作</th>
+                                </tr>
+                            </thead>
+                            <tbody id="appVersionsTable"></tbody>
+                        </table>
+                        <div class="pagination" id="appVersionsPagination"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Password Page -->
+            <div class="page" id="page-password">
+                <div class="card">
+                    <div class="card-header">
+                        <h2 data-i18n="auth.changePassword">修改密码</h2>
+                    </div>
+                    <div class="card-body" style="max-width:400px;">
+                        <div class="form-group">
+                            <label data-i18n="auth.oldPassword">当前密码</label>
+                            <input type="password" id="oldPassword" data-i18n-placeholder="adminPage.password.oldPasswordPlaceholder">
+                        </div>
+                        <div class="form-group">
+                            <label data-i18n="auth.newPassword">新密码</label>
+                            <input type="password" id="newPassword" data-i18n-placeholder="adminPage.password.newPasswordPlaceholder">
+                        </div>
+                        <div class="form-group">
+                            <label data-i18n="auth.confirmPassword">确认新密码</label>
+                            <input type="password" id="confirmPassword" data-i18n-placeholder="adminPage.password.confirmPasswordPlaceholder">
+                        </div>
+                        <button class="btn btn-primary" onclick="changeAdminPassword()" data-i18n="auth.changePassword">修改密码</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- IP Blacklist Page -->
+            <div class="page" id="page-ip-blacklist">
+                <div class="card">
+                    <div class="card-header">
+                        <h2 data-i18n="ipBlacklist.title">IP黑名单</h2>
+                        <button class="btn btn-primary btn-sm" onclick="showAddIPBlacklist()" data-i18n="ipBlacklist.addIP">添加IP</button>
+                    </div>
+                    <div class="card-body">
+                        <div class="filter-bar">
+                            <input type="text" id="blacklistIPSearch" data-i18n-placeholder="adminPage.ipBlacklist.searchIP">
+                            <button class="btn btn-primary btn-sm" onclick="loadIPBlacklist()" data-i18n="common.search">搜索</button>
+                        </div>
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th data-i18n="ipBlacklist.ip">IP地址</th>
+                                    <th data-i18n="adminPage.ipBlacklist.tableHeader.source">来源</th>
+                                    <th data-i18n="ipBlacklist.reason">原因</th>
+                                    <th data-i18n="adminPage.ipBlacklist.tableHeader.addTime">添加时间</th>
+                                    <th data-i18n="common.action">操作</th>
+                                </tr>
+                            </thead>
+                            <tbody id="ipBlacklistTable"></tbody>
+                        </table>
+                        <div class="pagination" id="ipBlacklistPagination"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal -->
+    <div class="modal" id="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="modalTitle" data-i18n="adminPage.modal.title">标题</h3>
+                <button class="modal-close" onclick="closeModal()">&times;</button>
+            </div>
+            <div id="modalBody"></div>
+        </div>
+    </div>
+
+    <script>
+        let token = localStorage.getItem('admin_token');
+
+        // Check auth
+        if (token) {
+            showApp();
+        }
+
+        // Login
+        async function login(e) {
+            e.preventDefault();
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+
+            try {
+                const res = await fetch('/admin/api/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password })
+                });
+                const data = await res.json();
+                if (data.code === 1) {
+                    token = data.token;
+                    localStorage.setItem('admin_token', token);
+                    showApp();
+                } else {
+                    alert(data.msg);
+                }
+            } catch (err) {
+                alert('登录失败');
+            }
+        }
+
+        function logout() {
+            localStorage.removeItem('admin_token');
+            location.reload();
+        }
+
+        function showApp() {
+            document.getElementById('loginContainer').style.display = 'none';
+            document.getElementById('appContainer').style.display = 'block';
+            loadDashboard();
+
+            // Menu navigation
+            document.querySelectorAll('.menu-item').forEach(item => {
+                item.addEventListener('click', function() {
+                    document.querySelectorAll('.menu-item').forEach(i => i.classList.remove('active'));
+                    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+                    this.classList.add('active');
+                    const page = this.dataset.page;
+                    document.getElementById('page-' + page).classList.add('active');
+                    document.getElementById('pageTitle').textContent = this.textContent;
+
+                    if (page === 'dashboard') loadDashboard();
+                    if (page === 'orders') { loadOrderMerchantFilter(); loadOrders(); }
+                    if (page === 'merchants') loadMerchants();
+                    if (page === 'wallets') loadWallets();
+                    if (page === 'chains') loadChains();
+                    if (page === 'api-logs') loadAPILogs();
+                    if (page === 'ip-blacklist') loadIPBlacklist();
+                    if (page === 'withdrawals') loadWithdrawals();
+                    if (page === 'withdraw-addresses') loadWithdrawAddresses();
+                    if (page === 'app-versions') loadAppVersions();
+                    if (page === 'settings') loadSettings();
+                });
+            });
+        }
+
+        async function api(url, options = {}) {
+            try {
+                const res = await fetch(url, {
+                    ...options,
+                    headers: {
+                        'Authorization': 'Bearer ' + token,
+                        'Content-Type': 'application/json',
+                        ...options.headers
+                    }
+                });
+                if (!res.ok) {
+                    return { code: -1, msg: `HTTP ${res.status}: ${res.statusText}` };
+                }
+                const data = await res.json();
+                if (data.code === -1 && data.msg === '未登录') {
+                    logout();
+                }
+                return data;
+            } catch (err) {
+                console.error('API Error:', err);
+                return { code: -1, msg: '网络请求失败: ' + err.message };
+            }
+        }
+
+        async function loadDashboard() {
+            const data = await api('/admin/api/dashboard');
+            if (data.code === 1) {
+                document.getElementById('todayOrders').textContent = data.data.stats.today_orders;
+                document.getElementById('todayUSDT').textContent = data.data.stats.today_usdt;
+                document.getElementById('currentRate').textContent = data.data.rate;
+                document.getElementById('pendingOrders').textContent = data.data.stats.pending_orders;
+
+                let statusHtml = '<table><tr><th>链</th><th>类型</th><th>状态</th><th>账号数量</th></tr>';
+                const chainNames = {
+                    'trx': 'TRX (Tron原生)',
+                    'trc20': 'TRC20 (Tron USDT)',
+                    'erc20': 'ERC20 (Ethereum)',
+                    'bsc': 'BEP20 (BSC)',
+                    'bep20': 'BEP20 (BSC)',
+                    'polygon': 'Polygon',
+                    'optimism': 'Optimism',
+                    'arbitrum': 'Arbitrum',
+                    'avalanche': 'Avalanche',
+                    'base': 'Base',
+                    'wechat': '微信支付',
+                    'alipay': '支付宝'
+                };
+                for (const [chain, info] of Object.entries(data.data.blockchain)) {
+                    const displayName = chainNames[chain] || chain.toUpperCase();
+                    const typeLabel = info.passive ? '<span class="badge" style="background:#9c27b0;color:white;">被动推送</span>' : '<span class="badge" style="background:#2196f3;color:white;">主动监控</span>';
+                    const statusLabel = info.running ? '<span class="badge badge-success">运行中</span>' : '<span class="badge badge-danger">已停止</span>';
+                    const walletCount = info.wallet_count || 0;
+                    statusHtml += `<tr><td>${displayName}</td><td>${typeLabel}</td><td>${statusLabel}</td><td>${walletCount}</td></tr>`;
+                }
+                statusHtml += '</table>';
+                document.getElementById('blockchainStatus').innerHTML = statusHtml;
+            }
+            // 加载趋势图和TOP数据
+            loadTrendData('today');
+            loadTopMerchants();
+        }
+
+        let ordersChartInstance = null;
+        let amountChartInstance = null;
+        let currentTrendPeriod = 'today';
+
+        function changeTrendPeriod(period) {
+            currentTrendPeriod = period;
+            document.querySelectorAll('.trend-period').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.period === period);
+            });
+            loadTrendData(period);
+        }
+
+        async function loadTrendData(period) {
+            const data = await api(`/admin/api/dashboard/trend?period=${period}`);
+            if (data.code === 1) {
+                renderCharts(data.data);
+            }
+        }
+
+        function renderCharts(data) {
+            if (ordersChartInstance) {
+                ordersChartInstance.destroy();
+            }
+            if (amountChartInstance) {
+                amountChartInstance.destroy();
+            }
+
+            const ordersCtx = document.getElementById('ordersChart').getContext('2d');
+            ordersChartInstance = new Chart(ordersCtx, {
+                type: 'line',
+                data: {
+                    labels: data.labels,
+                    datasets: [{
+                        label: '订单数',
+                        data: data.orders,
+                        borderColor: '#667eea',
+                        backgroundColor: 'rgba(102, 126, 234, 0.1)',
+                        fill: true,
+                        tension: 0.4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } }
+                }
+            });
+
+            const amountCtx = document.getElementById('amountChart').getContext('2d');
+            amountChartInstance = new Chart(amountCtx, {
+                type: 'bar',
+                data: {
+                    labels: data.labels,
+                    datasets: [{
+                        label: '金额(CNY)',
+                        data: data.amounts,
+                        backgroundColor: 'rgba(16, 185, 129, 0.7)',
+                        borderColor: '#10b981',
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: { y: { beginAtZero: true } }
+                }
+            });
+        }
+
+        async function loadTopMerchants() {
+            const data = await api('/admin/api/dashboard/top');
+            if (data.code === 1) {
+                // 金额TOP 5
+                let amountHtml = '';
+                (data.data.top_amount || []).forEach((m, i) => {
+                    amountHtml += `<tr>
+                        <td><span style="display:inline-block;width:24px;height:24px;border-radius:50%;background:${i < 3 ? '#667eea' : '#9ca3af'};color:white;text-align:center;line-height:24px;font-size:12px;">${i + 1}</span></td>
+                        <td>${m.name || m.pid}</td>
+                        <td style="font-weight:600;color:#059669;">¥${m.amount.toFixed(2)}</td>
+                    </tr>`;
+                });
+                document.getElementById('topAmountTable').innerHTML = amountHtml || '<tr><td colspan="3" style="text-align:center;color:#999;">暂无数据</td></tr>';
+
+                // 订单TOP 5
+                let countHtml = '';
+                (data.data.top_count || []).forEach((m, i) => {
+                    countHtml += `<tr>
+                        <td><span style="display:inline-block;width:24px;height:24px;border-radius:50%;background:${i < 3 ? '#667eea' : '#9ca3af'};color:white;text-align:center;line-height:24px;font-size:12px;">${i + 1}</span></td>
+                        <td>${m.name || m.pid}</td>
+                        <td style="font-weight:600;color:#3b82f6;">${m.count}</td>
+                    </tr>`;
+                });
+                document.getElementById('topCountTable').innerHTML = countHtml || '<tr><td colspan="3" style="text-align:center;color:#999;">暂无数据</td></tr>';
+            }
+        }
+
+        async function loadOrders() {
+            const merchantId = document.getElementById('orderMerchantFilter').value;
+            const status = document.getElementById('orderStatusFilter').value;
+            const startDate = document.getElementById('orderStartDate').value;
+            const endDate = document.getElementById('orderEndDate').value;
+            let url = '/admin/api/orders?';
+            if (merchantId) url += `merchant_id=${merchantId}&`;
+            if (status !== '') url += `status=${status}&`;
+            if (startDate) url += `start_date=${startDate}&`;
+            if (endDate) url += `end_date=${endDate}&`;
+
+            const data = await api(url);
+            if (data.code === 1) {
+                const tbody = document.getElementById('ordersTable');
+                tbody.innerHTML = (data.data || []).map(order => {
+                    const payType = order.type || order.chain || '-';
+                    const isPassive = payType === 'wechat' || payType === 'alipay';
+                    const isTRX = payType === 'trx';
+                    const receivedAmount = isPassive ? `¥${order.money}` : (isTRX ? `${order.usdt_amount || '-'} TRX` : `${order.usdt_amount || '-'} USDT`);
+                    return `
+                    <tr>
+                        <td>${order.trade_no}</td>
+                        <td><span class="badge" style="background:#607d8b;color:white;">${order.merchant_pid || '-'}</span></td>
+                        <td>${getPaymentTypeBadge(payType)}</td>
+                        <td>${order.out_trade_no}</td>
+                        <td>¥${order.money}</td>
+                        <td>${receivedAmount}</td>
+                        <td>${getStatusBadge(order.status)}</td>
+                        <td>${order.created_at}</td>
+                        <td style="white-space:nowrap;">
+                            <button class="btn btn-sm" onclick="viewOrder('${order.trade_no}')" data-i18n="common.detail">详情</button>
+                            ${(order.status === 0 || order.status === 2) ? `<button class="btn btn-primary btn-sm" style="margin-left:4px;" onclick="event.stopPropagation();markOrderPaid('${order.trade_no}')" data-i18n="adminPage.orders.manualConfirm">手动确认</button>` : ''}
+                        </td>
+                    </tr>
+                `}).join('');
+            }
+        }
+
+        async function loadOrderMerchantFilter() {
+            const data = await api('/admin/api/merchants');
+            if (data.code === 1) {
+                const select = document.getElementById('orderMerchantFilter');
+                select.innerHTML = '<option value="">全部商户</option>' +
+                    data.data.map(m => `<option value="${m.id}">${m.pid} - ${m.name}</option>`).join('');
+            }
+        }
+
+        function exportOrders() {
+            const merchantId = document.getElementById('orderMerchantFilter').value;
+            const status = document.getElementById('orderStatusFilter').value;
+            const startDate = document.getElementById('orderStartDate').value;
+            const endDate = document.getElementById('orderEndDate').value;
+            let url = '/admin/api/orders/export?';
+            if (merchantId) url += `merchant_id=${merchantId}&`;
+            if (status !== '') url += `status=${status}&`;
+            if (startDate) url += `start_date=${startDate}&`;
+            if (endDate) url += `end_date=${endDate}&`;
+
+            // 添加认证token到URL (通过隐藏iframe下载)
+            const link = document.createElement('a');
+            link.href = url;
+            link.style.display = 'none';
+
+            // 使用fetch下载，支持认证头
+            fetch(url, {
+                headers: { 'Authorization': 'Bearer ' + token }
+            }).then(response => {
+                if (!response.ok) throw new Error('导出失败');
+                return response.blob();
+            }).then(blob => {
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'orders_' + new Date().toISOString().slice(0,10).replace(/-/g,'') + '.csv';
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+                document.body.removeChild(a);
+            }).catch(err => {
+                alert('导出失败: ' + err.message);
+            });
+        }
+
+        function getStatusBadge(status) {
+            const map = {
+                0: '<span class="badge badge-warning">待支付</span>',
+                1: '<span class="badge badge-success">已支付</span>',
+                2: '<span class="badge badge-danger">已过期</span>',
+                3: '<span class="badge badge-danger">已取消</span>'
+            };
+            return map[status] || status;
+        }
+
+        function getPaymentTypeBadge(type) {
+            const map = {
+                'trc20': { name: 'TRC20', color: '#e53935' },
+                'erc20': { name: 'ERC20', color: '#1e88e5' },
+                'bep20': { name: 'BEP20', color: '#fdd835' },
+                'polygon': { name: 'Polygon', color: '#8e24aa' },
+                'optimism': { name: 'Optimism', color: '#e53935' },
+                'arbitrum': { name: 'Arbitrum', color: '#1e88e5' },
+                'avalanche': { name: 'Avalanche', color: '#e53935' },
+                'base': { name: 'Base', color: '#1e88e5' },
+                'wechat': { name: '微信支付', color: '#07c160' },
+                'alipay': { name: '支付宝', color: '#1677ff' }
+            };
+            const info = map[type] || { name: type || '-', color: '#9e9e9e' };
+            return `<span class="badge" style="background:${info.color};color:white;">${info.name}</span>`;
+        }
+
+        // 全局存储商户数据用于编辑
+        let merchantsData = {};
+
+        // 显示测试支付模态框
+        async function showTestPayment() {
+            // 先加载商户列表
+            const merchantsData = await api('/admin/api/merchants');
+            let merchantOptions = '';
+            if (merchantsData.code === 1 && merchantsData.data) {
+                merchantsData.data.forEach(m => {
+                    merchantOptions += `<option value="${m.id}">${m.pid} - ${m.name}</option>`;
+                });
+            }
+
+            document.getElementById('modalTitle').textContent = '发起测试支付';
+            document.getElementById('modalBody').innerHTML = `
+                <div class="form-group">
+                    <label>选择商户</label>
+                    <select id="testMerchant" style="width:100%;padding:12px;border:1px solid #ddd;border-radius:8px;">
+                        ${merchantOptions}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>支付方式</label>
+                    <select id="testPayType" style="width:100%;padding:12px;border:1px solid #ddd;border-radius:8px;">
+                        <option value="usdt_trc20">USDT-TRC20</option>
+                        <option value="usdt_erc20">USDT-ERC20</option>
+                        <option value="usdt_bep20">USDT-BEP20</option>
+                        <option value="usdt_polygon">USDT-Polygon</option>
+                        <option value="trx">TRX</option>
+                        <option value="wechat">微信</option>
+                        <option value="alipay">支付宝</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>金额(CNY)</label>
+                    <input type="number" id="testMoney" value="10" step="0.01" min="0.01" style="width:100%;padding:12px;border:1px solid #ddd;border-radius:8px;">
+                </div>
+                <div class="form-group">
+                    <label>商品名称(可选)</label>
+                    <input type="text" id="testName" placeholder="测试订单" style="width:100%;padding:12px;border:1px solid #ddd;border-radius:8px;">
+                </div>
+                <div style="display:flex;gap:10px;margin-top:20px;">
+                    <button class="btn btn-primary" onclick="createTestOrder()">创建并跳转支付</button>
+                    <button class="btn" onclick="closeModal()">取消</button>
+                </div>
+            `;
+            document.getElementById('modal').classList.add('show');
+        }
+
+        // 创建测试订单
+        async function createTestOrder() {
+            const merchantId = document.getElementById('testMerchant').value;
+            const payType = document.getElementById('testPayType').value;
+            const money = document.getElementById('testMoney').value;
+            const name = document.getElementById('testName').value;
+
+            if (!merchantId) {
+                alert('请选择商户');
+                return;
+            }
+            if (!money || parseFloat(money) <= 0) {
+                alert('请输入有效金额');
+                return;
+            }
+
+            const data = await api('/admin/api/orders/test', {
+                method: 'POST',
+                body: JSON.stringify({
+                    merchant_id: parseInt(merchantId),
+                    type: payType,
+                    money: money,
+                    name: name || '测试订单'
+                })
+            });
+
+            if (data.code === 1) {
+                closeModal();
+                // 打开收银台页面
+                window.open(data.pay_url, '_blank');
+                // 刷新订单列表
+                loadOrders();
+            } else {
+                alert(data.msg || '创建失败');
+            }
+        }
+
+        // 清理无效订单（超过24小时未支付的订单）
+        async function cleanInvalidOrders() {
+            if (!confirm('确定要清理所有超过24小时未支付的订单吗？此操作不可恢复！')) {
+                return;
+            }
+            const data = await api('/admin/api/orders/clean', { method: 'POST' });
+            if (data.code === 1) {
+                alert('清理完成，共删除 ' + data.count + ' 条无效订单');
+                loadOrders();
+            } else {
+                alert(data.msg || '清理失败');
+            }
+        }
+
+        async function loadMerchants() {
+            const data = await api('/admin/api/merchants');
+            if (data.code === 1) {
+                // 存储商户数据
+                data.data.forEach(m => merchantsData[m.id] = m);
+                const tbody = document.getElementById('merchantsTable');
+                tbody.innerHTML = data.data.map(m => `
+                    <tr>
+                        <td>${m.pid}</td>
+                        <td>${m.name}</td>
+                        <td>
+                            <span style="font-weight:600;color:#059669;">${(m.balance || 0).toFixed(2)}</span>
+                            ${m.frozen_balance > 0 ? `<span style="color:#d97706;font-size:12px;margin-left:4px;">(冻结:${m.frozen_balance.toFixed(2)})</span>` : ''}
+                            <button class="btn btn-sm" style="margin-left:8px;padding:2px 6px;font-size:11px;" onclick="adjustBalance(${m.id}, '${m.name}', ${m.balance || 0})">调整</button>
+                        </td>
+                        <td>${m.status === 1 ? '<span class="badge badge-success">正常</span>' : '<span class="badge badge-danger">禁用</span>'}</td>
+                        <td>${m.created_at}</td>
+                        <td>
+                            <button class="btn btn-sm" onclick="showMerchantKey(${m.id})">密钥</button>
+                            <button class="btn btn-sm btn-primary" onclick="editMerchant(${m.id})">编辑</button>
+                        </td>
+                    </tr>
+                `).join('');
+            }
+        }
+
+        function showAddMerchant() {
+            document.getElementById('modalTitle').textContent = '添加商户';
+            document.getElementById('modalBody').innerHTML = `
+                <div class="form-group">
+                    <label>商户名称</label>
+                    <input type="text" id="merchantName" style="width:100%;padding:12px;border:1px solid #ddd;border-radius:8px;" placeholder="商户名称">
+                </div>
+                <div class="form-group">
+                    <label>联系邮箱</label>
+                    <input type="email" id="merchantEmail" style="width:100%;padding:12px;border:1px solid #ddd;border-radius:8px;" placeholder="联系邮箱">
+                </div>
+                <div class="form-group">
+                    <label>登录密码 (商户后台登录)</label>
+                    <input type="password" id="merchantPassword" style="width:100%;padding:12px;border:1px solid #ddd;border-radius:8px;" placeholder="设置密码后商户可以登录商户后台">
+                </div>
+                <button class="btn btn-primary" onclick="addMerchant()">创建商户</button>
+            `;
+            document.getElementById('modal').classList.add('show');
+        }
+
+        async function addMerchant() {
+            const data = await api('/admin/api/merchants', {
+                method: 'POST',
+                body: JSON.stringify({
+                    name: document.getElementById('merchantName').value,
+                    email: document.getElementById('merchantEmail').value,
+                    password: document.getElementById('merchantPassword').value
+                })
+            });
+            if (data.code === 1) {
+                closeModal();
+                loadMerchants();
+                alert('商户创建成功! PID: ' + data.data.pid);
+            } else {
+                alert(data.msg);
+            }
+        }
+
+        function adjustBalance(id, name, currentBalance) {
+            document.getElementById('modalTitle').textContent = '调整余额 - ' + name;
+            document.getElementById('modalBody').innerHTML = `
+                <div style="background:#f0fdf4;padding:16px;border-radius:8px;margin-bottom:20px;">
+                    <div style="color:#166534;font-size:14px;">当前余额</div>
+                    <div style="font-size:28px;font-weight:bold;color:#059669;">${currentBalance.toFixed(2)} USDT</div>
+                </div>
+                <div class="form-group">
+                    <label>调整类型</label>
+                    <select id="adjustType" style="width:100%;padding:12px;border:1px solid #ddd;border-radius:8px;">
+                        <option value="add">增加余额</option>
+                        <option value="subtract">扣除余额</option>
+                        <option value="set">设置为指定值</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>金额 (USDT)</label>
+                    <input type="number" id="adjustAmount" step="0.01" min="0" style="width:100%;padding:12px;border:1px solid #ddd;border-radius:8px;" placeholder="请输入金额">
+                </div>
+                <div class="form-group">
+                    <label>备注</label>
+                    <input type="text" id="adjustRemark" style="width:100%;padding:12px;border:1px solid #ddd;border-radius:8px;" placeholder="调整原因(可选)">
+                </div>
+                <button class="btn btn-primary" onclick="submitAdjustBalance(${id})">确认调整</button>
+            `;
+            document.getElementById('modal').classList.add('show');
+        }
+
+        async function submitAdjustBalance(id) {
+            const type = document.getElementById('adjustType').value;
+            const amount = parseFloat(document.getElementById('adjustAmount').value);
+            const remark = document.getElementById('adjustRemark').value;
+
+            if (isNaN(amount) || amount < 0) {
+                alert('请输入有效金额');
+                return;
+            }
+
+            const data = await api('/admin/api/merchants/' + id + '/balance', {
+                method: 'POST',
+                body: JSON.stringify({
+                    type: type,
+                    amount: amount,
+                    remark: remark
+                })
+            });
+
+            if (data.code === 1) {
+                alert('余额调整成功');
+                document.getElementById('modal').classList.remove('show');
+                loadMerchants();
+            } else {
+                alert(data.msg || '调整失败');
+            }
+        }
+
+        function editMerchant(id) {
+            const m = merchantsData[id] || {};
+            document.getElementById('modalTitle').textContent = '编辑商户';
+            document.getElementById('modalBody').innerHTML = `
+                <div class="form-group">
+                    <label>商户名称</label>
+                    <input type="text" id="editMerchantName" value="${m.name || ''}" style="width:100%;padding:12px;border:1px solid #ddd;border-radius:8px;">
+                </div>
+                <div class="form-group">
+                    <label>联系邮箱</label>
+                    <input type="email" id="editMerchantEmail" value="${m.email || ''}" style="width:100%;padding:12px;border:1px solid #ddd;border-radius:8px;">
+                </div>
+                <div class="form-group">
+                    <label>重置密码 (留空不修改)</label>
+                    <input type="password" id="editMerchantPassword" style="width:100%;padding:12px;border:1px solid #ddd;border-radius:8px;" placeholder="输入新密码">
+                </div>
+                <div class="form-group">
+                    <label>钱包数量限制 (0表示不限制)</label>
+                    <input type="number" id="editMerchantWalletLimit" value="${m.wallet_limit || 10}" min="0" style="width:100%;padding:12px;border:1px solid #ddd;border-radius:8px;">
+                </div>
+                <div class="form-group">
+                    <label>状态</label>
+                    <select id="editMerchantStatus" style="width:100%;padding:12px;border:1px solid #ddd;border-radius:8px;">
+                        <option value="1" ${m.status === 1 ? 'selected' : ''}>正常</option>
+                        <option value="0" ${m.status === 0 ? 'selected' : ''}>禁用</option>
+                    </select>
+                </div>
+                <hr style="margin:20px 0;border:none;border-top:1px solid #eee;">
+                <h4 style="margin-bottom:16px;color:#666;">白名单设置</h4>
+                <div class="form-group">
+                    <label style="display:inline-flex;align-items:center;gap:8px;cursor:pointer;">
+                        <input type="checkbox" id="editIPWhitelistEnabled" ${m.ip_whitelist_enabled ? 'checked' : ''} style="margin:0;width:16px;height:16px;">
+                        <span>启用IP白名单</span>
+                    </label>
+                    <input type="text" id="editIPWhitelist" value="${m.ip_whitelist || ''}" style="width:100%;padding:12px;border:1px solid #ddd;border-radius:8px;margin-top:8px;" placeholder="IP地址，多个用逗号分隔，如: 192.168.1.1,10.0.0.0/24">
+                    <small style="color:#999;display:block;margin-top:4px;">仅允许白名单中的IP调用API</small>
+                </div>
+                <div class="form-group">
+                    <label style="display:inline-flex;align-items:center;gap:8px;cursor:pointer;">
+                        <input type="checkbox" id="editRefererWhitelistEnabled" ${m.referer_whitelist_enabled ? 'checked' : ''} style="margin:0;width:16px;height:16px;">
+                        <span>启用Referer白名单</span>
+                    </label>
+                    <input type="text" id="editRefererWhitelist" value="${m.referer_whitelist || ''}" style="width:100%;padding:12px;border:1px solid #ddd;border-radius:8px;margin-top:8px;" placeholder="域名，多个用逗号分隔，如: example.com,*.test.com">
+                    <small style="color:#999;display:block;margin-top:4px;">仅允许白名单中的域名来源调用API</small>
+                </div>
+                <button class="btn btn-primary" onclick="updateMerchant(${id})">保存修改</button>
+            `;
+            document.getElementById('modal').classList.add('show');
+        }
+
+        async function updateMerchant(id) {
+            const updateData = {
+                name: document.getElementById('editMerchantName').value,
+                email: document.getElementById('editMerchantEmail').value,
+                wallet_limit: parseInt(document.getElementById('editMerchantWalletLimit').value) || 0,
+                status: parseInt(document.getElementById('editMerchantStatus').value),
+                ip_whitelist_enabled: document.getElementById('editIPWhitelistEnabled').checked,
+                ip_whitelist: document.getElementById('editIPWhitelist').value,
+                referer_whitelist_enabled: document.getElementById('editRefererWhitelistEnabled').checked,
+                referer_whitelist: document.getElementById('editRefererWhitelist').value
+            };
+            const password = document.getElementById('editMerchantPassword').value;
+            if (password) {
+                updateData.password = password;
+            }
+            const data = await api('/admin/api/merchants/' + id, {
+                method: 'PUT',
+                body: JSON.stringify(updateData)
+            });
+            if (data.code === 1) {
+                closeModal();
+                loadMerchants();
+            } else {
+                alert(data.msg);
+            }
+        }
+
+        async function loadWallets() {
+            const data = await api('/admin/api/wallets');
+            if (data.code === 1) {
+                const tbody = document.getElementById('walletsTable');
+                tbody.innerHTML = data.data.map(w => `
+                    <tr>
+                        <td><span class="badge ${w.merchant_id === 0 ? 'badge-primary' : 'badge-info'}">${w.merchant_pid || '系统'}</span></td>
+                        <td><span class="badge badge-success">${w.chain.toUpperCase()}</span></td>
+                        <td style="font-family:monospace;font-size:12px;">${w.address}</td>
+                        <td>${w.label || '-'}</td>
+                        <td>${w.status === 1 ? '启用' : '禁用'}</td>
+                        <td>
+                            <button class="btn btn-sm" onclick="deleteWallet(${w.id})">删除</button>
+                        </td>
+                    </tr>
+                `).join('');
+            }
+        }
+
+        async function loadSettings() {
+            const data = await api('/admin/api/configs');
+            if (data.code === 1) {
+                document.getElementById('cfg_rate_mode').value = data.data.rate_mode || 'hybrid';
+                document.getElementById('cfg_manual_rate').value = data.data.manual_rate || '7.2';
+                document.getElementById('cfg_order_expire').value = data.data.order_expire || '30';
+                document.getElementById('cfg_notify_retry').value = data.data.notify_retry || '5';
+                document.getElementById('cfg_system_wallet_fee_rate').value = data.data.system_wallet_fee_rate || '0.02';
+                document.getElementById('cfg_personal_wallet_fee_rate').value = data.data.personal_wallet_fee_rate || '0.01';
+                document.getElementById('cfg_telegram_bot_token').value = data.data.telegram_bot_token || '';
+                document.getElementById('cfg_telegram_bot_username').value = data.data.telegram_bot_username || '';
+                document.getElementById('cfg_service_telegram').value = data.data.service_telegram || '';
+                document.getElementById('cfg_service_discord').value = data.data.service_discord || '';
+            }
+        }
+
+        async function saveSettings() {
+            const settings = {
+                rate_mode: document.getElementById('cfg_rate_mode').value,
+                manual_rate: document.getElementById('cfg_manual_rate').value,
+                order_expire: document.getElementById('cfg_order_expire').value,
+                notify_retry: document.getElementById('cfg_notify_retry').value,
+                system_wallet_fee_rate: document.getElementById('cfg_system_wallet_fee_rate').value,
+                personal_wallet_fee_rate: document.getElementById('cfg_personal_wallet_fee_rate').value,
+                telegram_bot_token: document.getElementById('cfg_telegram_bot_token').value,
+                telegram_bot_username: document.getElementById('cfg_telegram_bot_username').value,
+                service_telegram: document.getElementById('cfg_service_telegram').value,
+                service_discord: document.getElementById('cfg_service_discord').value
+            };
+            const data = await api('/admin/api/configs', {
+                method: 'POST',
+                body: JSON.stringify(settings)
+            });
+            if (data.code === 1) {
+                alert('保存成功');
+            } else {
+                alert(data.msg);
+            }
+        }
+
+        async function testTelegramBot() {
+            const token = document.getElementById('cfg_telegram_bot_token').value;
+            if (!token) {
+                alert('请先填写 Bot Token');
+                return;
+            }
+            const statusDiv = document.getElementById('telegramStatus');
+            const statusIcon = document.getElementById('telegramStatusIcon');
+            const statusText = document.getElementById('telegramStatusText');
+            statusDiv.style.display = 'block';
+            statusDiv.style.background = '#fff3cd';
+            statusIcon.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+            statusText.textContent = ' 正在测试连接...';
+
+            const data = await api('/admin/api/telegram/test', {
+                method: 'POST',
+                body: JSON.stringify({ token: token })
+            });
+            if (data.code === 1) {
+                statusDiv.style.background = '#d4edda';
+                statusIcon.innerHTML = '<i class="fas fa-check-circle" style="color:#28a745;"></i>';
+                statusText.textContent = ' 连接成功! Bot: ' + (data.data.username || 'Unknown');
+                // 自动填充 Bot 用户名
+                document.getElementById('cfg_telegram_bot_username').value = data.data.username || '';
+            } else {
+                statusDiv.style.background = '#f8d7da';
+                statusIcon.innerHTML = '<i class="fas fa-times-circle" style="color:#dc3545;"></i>';
+                statusText.textContent = ' 连接失败: ' + data.msg;
+            }
+        }
+
+        async function showAddWallet() {
+            // 先加载商户列表
+            const merchantsData = await api('/admin/api/merchants');
+            let merchantOptions = '<option value="0">系统钱包 (所有商户可用)</option>';
+            if (merchantsData.code === 1 && merchantsData.data) {
+                merchantsData.data.forEach(m => {
+                    merchantOptions += `<option value="${m.id}">${m.pid} - ${m.name}</option>`;
+                });
+            }
+
+            document.getElementById('modalTitle').textContent = '添加钱包';
+            document.getElementById('modalBody').innerHTML = `
+                <div class="form-group">
+                    <label>归属商户</label>
+                    <select id="walletMerchant" style="width:100%;padding:12px;border:1px solid #ddd;border-radius:8px;">
+                        ${merchantOptions}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>类型</label>
+                    <select id="walletChain" style="width:100%;padding:12px;border:1px solid #ddd;border-radius:8px;" onchange="onChainChange()">
+                        <option value="trx">TRX (Tron原生)</option>
+                        <option value="trc20">TRC20 (Tron USDT)</option>
+                        <option value="erc20">ERC20 (Ethereum)</option>
+                        <option value="bep20">BEP20 (BSC)</option>
+                        <option value="polygon">Polygon</option>
+                        <option value="optimism">Optimism</option>
+                        <option value="arbitrum">Arbitrum</option>
+                        <option value="avalanche">Avalanche</option>
+                        <option value="base">Base</option>
+                        <option value="wechat">微信收款</option>
+                        <option value="alipay">支付宝收款</option>
+                    </select>
+                </div>
+                <div class="form-group" id="addressGroup">
+                    <label>钱包地址 / 收款账号</label>
+                    <input type="text" id="walletAddress" style="width:100%;padding:12px;border:1px solid #ddd;border-radius:8px;" placeholder="USDT钱包地址">
+                </div>
+                <div class="form-group" id="qrcodeGroup" style="display:none;">
+                    <label>收款码图片</label>
+                    <input type="file" id="qrcodeFile" accept="image/*" style="width:100%;padding:12px;border:1px solid #ddd;border-radius:8px;">
+                    <img id="qrcodePreview" style="max-width:200px;margin-top:10px;display:none;">
+                    <input type="hidden" id="walletQRCode">
+                </div>
+                <div class="form-group">
+                    <label>标签(可选)</label>
+                    <input type="text" id="walletLabel" style="width:100%;padding:12px;border:1px solid #ddd;border-radius:8px;">
+                </div>
+                <button class="btn btn-primary" onclick="addWallet()">添加</button>
+            `;
+            document.getElementById('modal').classList.add('show');
+
+            // 绑定文件上传事件
+            document.getElementById('qrcodeFile').addEventListener('change', uploadQRCode);
+        }
+
+        function onChainChange() {
+            const chain = document.getElementById('walletChain').value;
+            const qrcodeGroup = document.getElementById('qrcodeGroup');
+            const addressGroup = document.getElementById('addressGroup');
+            const isFiat = (chain === 'wechat' || chain === 'alipay');
+
+            if (isFiat) {
+                // 微信/支付宝: 显示收款码上传，隐藏地址输入框
+                qrcodeGroup.style.display = 'block';
+                addressGroup.style.display = 'none';
+            } else {
+                // 加密货币: 显示地址输入框，隐藏收款码上传
+                qrcodeGroup.style.display = 'none';
+                addressGroup.style.display = 'block';
+            }
+        }
+
+        async function uploadQRCode() {
+            const fileInput = document.getElementById('qrcodeFile');
+            if (!fileInput.files.length) return;
+
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+
+            try {
+                const res = await fetch('/admin/api/upload/qrcode', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': 'Bearer ' + token
+                    },
+                    body: formData
+                });
+                const data = await res.json();
+                if (data.code === 1) {
+                    document.getElementById('walletQRCode').value = data.url;
+                    document.getElementById('qrcodePreview').src = data.url;
+                    document.getElementById('qrcodePreview').style.display = 'block';
+                    // 保存二维码解析出的地址
+                    document.getElementById('walletAddress').value = data.address || '';
+                } else {
+                    alert(data.msg);
+                }
+            } catch (err) {
+                alert('上传失败');
+            }
+        }
+
+        async function addWallet() {
+            const chain = document.getElementById('walletChain').value;
+            const qrcodeInput = document.getElementById('walletQRCode');
+            const qrcode = qrcodeInput ? qrcodeInput.value : '';
+            const merchantId = parseInt(document.getElementById('walletMerchant').value) || 0;
+
+            const data = await api('/admin/api/wallets', {
+                method: 'POST',
+                body: JSON.stringify({
+                    chain: chain,
+                    address: document.getElementById('walletAddress').value,
+                    label: document.getElementById('walletLabel').value,
+                    qrcode: qrcode,
+                    merchant_id: merchantId
+                })
+            });
+            if (data.code === 1) {
+                closeModal();
+                loadWallets();
+            } else {
+                alert(data.msg);
+            }
+        }
+
+        async function deleteWallet(id) {
+            if (!confirm('确定删除?')) return;
+            const data = await api('/admin/api/wallets/' + id, { method: 'DELETE' });
+            if (data.code === 1) {
+                loadWallets();
+            } else {
+                alert(data.msg);
+            }
+        }
+
+        async function showMerchantKey(id) {
+            const data = await api('/admin/api/merchants/' + id + '/key');
+            if (data.code === 1) {
+                alert('商户密钥: ' + data.key);
+            }
+        }
+
+        function closeModal() {
+            document.getElementById('modal').classList.remove('show');
+        }
+
+        // Chain management
+        const chainNames = {
+            'trx': 'TRX (Tron原生)',
+            'trc20': 'TRC20 (Tron)',
+            'erc20': 'ERC20 (Ethereum)',
+            'bep20': 'BEP20 (BSC)',
+            'polygon': 'Polygon',
+            'optimism': 'Optimism',
+            'arbitrum': 'Arbitrum',
+            'avalanche': 'Avalanche',
+            'base': 'Base'
+        };
+
+        async function loadChains() {
+            const data = await api('/admin/api/chains');
+            if (data.code === 1) {
+                const tbody = document.getElementById('chainsTable');
+                const chainOrder = ['trx', 'trc20', 'erc20', 'bep20', 'polygon', 'optimism', 'arbitrum', 'avalanche', 'base'];
+                let html = '';
+
+                for (const chain of chainOrder) {
+                    const info = data.data[chain];
+                    if (!info) continue;
+
+                    const enabledBadge = info.enabled ?
+                        '<span class="badge badge-success">已启用</span>' :
+                        '<span class="badge badge-danger">已禁用</span>';
+                    const runningBadge = info.running ?
+                        '<span class="badge badge-success">运行中</span>' :
+                        '<span class="badge badge-warning">已停止</span>';
+                    const actionBtn = info.enabled ?
+                        `<button class="btn btn-sm" style="background:#f44336;color:white;" onclick="toggleChain('${chain}', false)">禁用</button>` :
+                        `<button class="btn btn-sm btn-primary" onclick="toggleChain('${chain}', true)">启用</button>`;
+
+                    html += `
+                        <tr>
+                            <td><strong>${chainNames[chain] || chain.toUpperCase()}</strong></td>
+                            <td>${enabledBadge}</td>
+                            <td>${runningBadge}</td>
+                            <td>${info.wallet_count || 0}</td>
+                            <td>${info.interval}秒</td>
+                            <td>${actionBtn}</td>
+                        </tr>
+                    `;
+                }
+                tbody.innerHTML = html;
+            }
+        }
+
+        async function toggleChain(chain, enable) {
+            const action = enable ? 'enable' : 'disable';
+            const data = await api(`/admin/api/chains/${chain}/${action}`, { method: 'POST' });
+            if (data.code === 1) {
+                loadChains();
+            } else {
+                alert(data.msg);
+            }
+        }
+
+        let apiLogsPage = 1;
+        async function loadAPILogs(page = 1) {
+            apiLogsPage = page;
+            const merchantPid = document.getElementById('apiLogMerchantPid').value;
+            const endpoint = document.getElementById('apiLogEndpoint').value;
+            const responseCode = document.getElementById('apiLogResponseCode').value;
+            const tradeNo = document.getElementById('apiLogTradeNo').value;
+
+            let url = `/admin/api/api-logs?page=${page}`;
+            if (merchantPid) url += `&merchant_pid=${encodeURIComponent(merchantPid)}`;
+            if (endpoint) url += `&endpoint=${encodeURIComponent(endpoint)}`;
+            if (responseCode) url += `&response_code=${responseCode}`;
+            if (tradeNo) url += `&trade_no=${encodeURIComponent(tradeNo)}`;
+
+            const data = await api(url);
+            if (data.code === 1) {
+                const tbody = document.getElementById('apiLogsTable');
+                let html = '';
+                for (const log of data.data || []) {
+                    const time = new Date(log.created_at).toLocaleString('zh-CN');
+                    const statusBadge = log.response_code === 1 ?
+                        '<span class="badge badge-success">成功</span>' :
+                        (log.response_code === -1 ?
+                            '<span class="badge badge-danger">失败</span>' :
+                            '<span class="badge badge-warning">其他</span>');
+                    html += `
+                        <tr>
+                            <td style="white-space:nowrap;">${time}</td>
+                            <td>${log.merchant_pid || '-'}</td>
+                            <td>${log.endpoint}</td>
+                            <td>${log.method}</td>
+                            <td>${log.client_ip}</td>
+                            <td>${statusBadge}</td>
+                            <td title="${log.response_msg || ''}">${(log.response_msg || '').substring(0, 20)}</td>
+                            <td>${log.trade_no || '-'}</td>
+                            <td>${log.duration}ms</td>
+                            <td><button class="btn btn-sm" style="background:#f44336;color:white;" onclick="blockIP('${log.client_ip}')">拉黑</button></td>
+                        </tr>
+                    `;
+                }
+                tbody.innerHTML = html || '<tr><td colspan="10" style="text-align:center;">暂无数据</td></tr>';
+
+                // 分页
+                const totalPages = Math.ceil(data.total / 20);
+                let paginationHtml = '';
+                if (totalPages > 1) {
+                    if (page > 1) paginationHtml += `<button onclick="loadAPILogs(${page - 1})">上一页</button>`;
+                    paginationHtml += ` 第 ${page} / ${totalPages} 页 `;
+                    if (page < totalPages) paginationHtml += `<button onclick="loadAPILogs(${page + 1})">下一页</button>`;
+                }
+                document.getElementById('apiLogsPagination').innerHTML = paginationHtml;
+            }
+        }
+
+        // 清理API日志
+        async function cleanAPILogs(days) {
+            const labels = {1: '一日', 3: '三日', 7: '一周', 30: '一月'};
+            if (!confirm(`确定要清理${labels[days] || days + '天'}前的所有API日志吗？此操作不可恢复！`)) {
+                return;
+            }
+            const data = await api('/admin/api/api-logs/clean', {
+                method: 'POST',
+                body: JSON.stringify({ days: days })
+            });
+            if (data.code === 1) {
+                alert('清理完成，共删除 ' + data.count + ' 条日志');
+                loadAPILogs();
+            } else {
+                alert(data.msg || '清理失败');
+            }
+        }
+
+        // ========== IP黑名单管理 ==========
+        let ipBlacklistPage = 1;
+        async function loadIPBlacklist(page = 1) {
+            ipBlacklistPage = page;
+            const ip = document.getElementById('blacklistIPSearch').value;
+            let url = `/admin/api/ip-blacklist?page=${page}`;
+            if (ip) url += `&ip=${encodeURIComponent(ip)}`;
+
+            const data = await api(url);
+            if (data.code === 1) {
+                const tbody = document.getElementById('ipBlacklistTable');
+                let html = '';
+                for (const item of data.data || []) {
+                    const time = new Date(item.created_at).toLocaleString('zh-CN');
+                    const sourceBadge = item.source === 'manual' ?
+                        '<span class="badge" style="background:#2196f3;color:white;">手动添加</span>' :
+                        '<span class="badge" style="background:#ff9800;color:white;">API日志拉黑</span>';
+                    html += `
+                        <tr>
+                            <td style="font-family:monospace;">${item.ip}</td>
+                            <td>${sourceBadge}</td>
+                            <td>${item.reason || '-'}</td>
+                            <td>${time}</td>
+                            <td><button class="btn btn-sm" style="background:#4caf50;color:white;" onclick="unblockIP(${item.id})">解除</button></td>
+                        </tr>
+                    `;
+                }
+                tbody.innerHTML = html || '<tr><td colspan="5" style="text-align:center;">暂无数据</td></tr>';
+
+                // 分页
+                const totalPages = Math.ceil(data.total / 20);
+                let paginationHtml = '';
+                if (totalPages > 1) {
+                    if (page > 1) paginationHtml += `<button onclick="loadIPBlacklist(${page - 1})">上一页</button>`;
+                    paginationHtml += ` 第 ${page} / ${totalPages} 页 `;
+                    if (page < totalPages) paginationHtml += `<button onclick="loadIPBlacklist(${page + 1})">下一页</button>`;
+                }
+                document.getElementById('ipBlacklistPagination').innerHTML = paginationHtml;
+            }
+        }
+
+        function showAddIPBlacklist() {
+            document.getElementById('modalTitle').textContent = '添加IP到黑名单';
+            document.getElementById('modalBody').innerHTML = `
+                <div class="form-group">
+                    <label>IP地址</label>
+                    <input type="text" id="newBlacklistIP" style="width:100%;padding:12px;border:1px solid #ddd;border-radius:8px;" placeholder="例如: 192.168.1.1">
+                </div>
+                <div class="form-group">
+                    <label>拉黑原因(可选)</label>
+                    <input type="text" id="newBlacklistReason" style="width:100%;padding:12px;border:1px solid #ddd;border-radius:8px;" placeholder="例如: 恶意刷接口">
+                </div>
+                <button class="btn btn-primary" onclick="addIPToBlacklist()">添加</button>
+            `;
+            document.getElementById('modal').classList.add('show');
+        }
+
+        async function addIPToBlacklist() {
+            const ip = document.getElementById('newBlacklistIP').value;
+            const reason = document.getElementById('newBlacklistReason').value;
+
+            if (!ip) {
+                alert('请输入IP地址');
+                return;
+            }
+
+            const data = await api('/admin/api/ip-blacklist', {
+                method: 'POST',
+                body: JSON.stringify({ ip, reason })
+            });
+
+            if (data.code === 1) {
+                closeModal();
+                loadIPBlacklist();
+                alert('添加成功');
+            } else {
+                alert(data.msg);
+            }
+        }
+
+        async function blockIP(ip) {
+            if (!confirm(`确定要将 ${ip} 加入黑名单吗?`)) return;
+
+            const data = await api('/admin/api/ip-blacklist/block', {
+                method: 'POST',
+                body: JSON.stringify({ ip, reason: '从API日志一键拉黑' })
+            });
+
+            if (data.code === 1) {
+                alert(data.msg);
+            } else {
+                alert(data.msg);
+            }
+        }
+
+        async function unblockIP(id) {
+            if (!confirm('确定要解除该IP的黑名单吗?')) return;
+
+            const data = await api('/admin/api/ip-blacklist/' + id, {
+                method: 'DELETE'
+            });
+
+            if (data.code === 1) {
+                loadIPBlacklist();
+            } else {
+                alert(data.msg);
+            }
+        }
+
+        // ========== 提现管理 ==========
+        let withdrawalsPage = 1;
+        async function loadWithdrawals(page = 1) {
+            withdrawalsPage = page;
+            const status = document.getElementById('withdrawalStatusFilter').value;
+            let url = `/admin/api/withdrawals?page=${page}`;
+            if (status !== '') url += `&status=${status}`;
+
+            const data = await api(url);
+            if (data.code === 1) {
+                const tbody = document.getElementById('withdrawalsTable');
+                let html = '';
+                for (const w of data.data || []) {
+                    const time = new Date(w.created_at).toLocaleString('zh-CN');
+                    let statusBadge = '';
+                    let actionBtns = '';
+                    switch(w.status) {
+                        case 0:
+                            statusBadge = '<span class="badge badge-warning">待审核</span>';
+                            actionBtns = `
+                                <button class="btn btn-sm btn-primary" onclick="approveWithdrawal(${w.id})">通过</button>
+                                <button class="btn btn-sm" style="background:#f44336;color:white;" onclick="rejectWithdrawal(${w.id})">拒绝</button>
+                            `;
+                            break;
+                        case 1:
+                            statusBadge = '<span class="badge" style="background:#2196f3;color:white;">待打款</span>';
+                            actionBtns = `<button class="btn btn-sm btn-primary" onclick="completeWithdrawal(${w.id})">完成打款</button>`;
+                            break;
+                        case 2:
+                            statusBadge = '<span class="badge badge-danger">已拒绝</span>';
+                            break;
+                        case 3:
+                            statusBadge = '<span class="badge badge-success">已完成</span>';
+                            break;
+                    }
+                    const methodName = w.method === 'usdt' ? 'USDT' : (w.method === 'bank' ? '银行卡' : w.method);
+                    html += `
+                        <tr>
+                            <td>${w.id}</td>
+                            <td><span class="badge" style="background:#607d8b;color:white;">${w.merchant_pid || '-'}</span> ${w.merchant_name || ''}</td>
+                            <td>¥${w.amount}</td>
+                            <td>¥${w.fee}</td>
+                            <td>¥${w.actual_amount}</td>
+                            <td>${methodName}</td>
+                            <td style="font-size:12px;">${w.account_info || '-'}</td>
+                            <td>${statusBadge}</td>
+                            <td>${time}</td>
+                            <td>${actionBtns}</td>
+                        </tr>
+                    `;
+                }
+                tbody.innerHTML = html || '<tr><td colspan="10" style="text-align:center;">暂无数据</td></tr>';
+
+                // 分页
+                const totalPages = Math.ceil((data.total || 0) / 20);
+                let paginationHtml = '';
+                if (totalPages > 1) {
+                    if (page > 1) paginationHtml += `<button onclick="loadWithdrawals(${page - 1})">上一页</button>`;
+                    paginationHtml += ` 第 ${page} / ${totalPages} 页 `;
+                    if (page < totalPages) paginationHtml += `<button onclick="loadWithdrawals(${page + 1})">下一页</button>`;
+                }
+                document.getElementById('withdrawalsPagination').innerHTML = paginationHtml;
+            }
+        }
+
+        async function approveWithdrawal(id) {
+            const remark = prompt('审核备注(可选):');
+            const data = await api(`/admin/api/withdrawals/${id}/approve`, {
+                method: 'POST',
+                body: JSON.stringify({ admin_remark: remark || '' })
+            });
+            if (data.code === 1) {
+                alert('审核通过');
+                loadWithdrawals(withdrawalsPage);
+            } else {
+                alert(data.msg);
+            }
+        }
+
+        async function rejectWithdrawal(id) {
+            const remark = prompt('拒绝原因:');
+            if (!remark) {
+                alert('请填写拒绝原因');
+                return;
+            }
+            const data = await api(`/admin/api/withdrawals/${id}/reject`, {
+                method: 'POST',
+                body: JSON.stringify({ admin_remark: remark })
+            });
+            if (data.code === 1) {
+                alert('已拒绝');
+                loadWithdrawals(withdrawalsPage);
+            } else {
+                alert(data.msg);
+            }
+        }
+
+        async function completeWithdrawal(id) {
+            if (!confirm('确认已完成打款?')) return;
+            const remark = prompt('打款备注(可选):');
+            const data = await api(`/admin/api/withdrawals/${id}/complete`, {
+                method: 'POST',
+                body: JSON.stringify({ admin_remark: remark || '' })
+            });
+            if (data.code === 1) {
+                alert('打款完成');
+                loadWithdrawals(withdrawalsPage);
+            } else {
+                alert(data.msg);
+            }
+        }
+
+        // ========== 提现地址审核 ==========
+        let withdrawAddressesPage = 1;
+        async function loadWithdrawAddresses(page = 1) {
+            withdrawAddressesPage = page;
+            const status = document.getElementById('addressStatusFilter').value;
+            let url = `/admin/api/withdraw-addresses?page=${page}`;
+            if (status !== '') url += `&status=${status}`;
+
+            const data = await api(url);
+            if (data.code === 1) {
+                const tbody = document.getElementById('withdrawAddressesTable');
+                let html = '';
+                const chainNames = { 'trc20': 'TRC20', 'bep20': 'BEP20', 'polygon': 'Polygon', 'optimism': 'Optimism' };
+                for (const addr of data.data || []) {
+                    const time = new Date(addr.created_at).toLocaleString('zh-CN');
+                    let statusBadge = '';
+                    let actionBtns = '';
+                    switch(addr.status) {
+                        case 0:
+                            statusBadge = '<span class="badge badge-warning">待审核</span>';
+                            actionBtns = `
+                                <button class="btn btn-sm btn-primary" onclick="approveWithdrawAddress(${addr.id})">通过</button>
+                                <button class="btn btn-sm" style="background:#f44336;color:white;" onclick="rejectWithdrawAddress(${addr.id})">拒绝</button>
+                            `;
+                            break;
+                        case 1:
+                            statusBadge = '<span class="badge badge-success">已通过</span>';
+                            break;
+                        case 2:
+                            statusBadge = '<span class="badge badge-danger">已拒绝</span>';
+                            break;
+                    }
+                    const chainName = chainNames[addr.chain] || addr.chain;
+                    html += `
+                        <tr>
+                            <td>${addr.id}</td>
+                            <td><span class="badge" style="background:#607d8b;color:white;">${addr.merchant_pid || '-'}</span> ${addr.merchant_name || ''}</td>
+                            <td><span class="badge" style="background:${addr.chain === 'trc20' ? '#9c27b0' : (addr.chain === 'bep20' ? '#ff9800' : '#2196f3')};color:white;">${chainName}</span></td>
+                            <td style="font-size:12px;max-width:200px;word-break:break-all;">${addr.address}</td>
+                            <td>${addr.label || '-'}</td>
+                            <td>${statusBadge}</td>
+                            <td>${time}</td>
+                            <td>${actionBtns}</td>
+                        </tr>
+                    `;
+                }
+                tbody.innerHTML = html || '<tr><td colspan="8" style="text-align:center;">暂无数据</td></tr>';
+
+                // 分页
+                const totalPages = Math.ceil((data.total || 0) / 20);
+                let paginationHtml = '';
+                if (totalPages > 1) {
+                    if (page > 1) paginationHtml += `<button onclick="loadWithdrawAddresses(${page - 1})">上一页</button>`;
+                    paginationHtml += ` 第 ${page} / ${totalPages} 页 `;
+                    if (page < totalPages) paginationHtml += `<button onclick="loadWithdrawAddresses(${page + 1})">下一页</button>`;
+                }
+                document.getElementById('withdrawAddressesPagination').innerHTML = paginationHtml;
+            }
+        }
+
+        async function approveWithdrawAddress(id) {
+            const remark = prompt('审核备注(可选):');
+            const data = await api(`/admin/api/withdraw-addresses/${id}/approve`, {
+                method: 'POST',
+                body: JSON.stringify({ admin_remark: remark || '' })
+            });
+            if (data.code === 1) {
+                alert('审核通过');
+                loadWithdrawAddresses(withdrawAddressesPage);
+            } else {
+                alert(data.msg);
+            }
+        }
+
+        async function rejectWithdrawAddress(id) {
+            const remark = prompt('拒绝原因:');
+            if (!remark) {
+                alert('请填写拒绝原因');
+                return;
+            }
+            const data = await api(`/admin/api/withdraw-addresses/${id}/reject`, {
+                method: 'POST',
+                body: JSON.stringify({ admin_remark: remark })
+            });
+            if (data.code === 1) {
+                alert('已拒绝');
+                loadWithdrawAddresses(withdrawAddressesPage);
+            } else {
+                alert(data.msg);
+            }
+        }
+
+        // ========== 修改密码 ==========
+        async function changeAdminPassword() {
+            const oldPassword = document.getElementById('oldPassword').value;
+            const newPassword = document.getElementById('newPassword').value;
+            const confirmPassword = document.getElementById('confirmPassword').value;
+
+            if (!oldPassword || !newPassword) {
+                alert('请填写所有字段');
+                return;
+            }
+            if (newPassword.length < 6) {
+                alert('新密码至少6位');
+                return;
+            }
+            if (newPassword !== confirmPassword) {
+                alert('两次输入的新密码不一致');
+                return;
+            }
+
+            const data = await api('/admin/api/password', {
+                method: 'POST',
+                body: JSON.stringify({
+                    old_password: oldPassword,
+                    new_password: newPassword
+                })
+            });
+
+            if (data.code === 1) {
+                alert('密码修改成功，请重新登录');
+                document.getElementById('oldPassword').value = '';
+                document.getElementById('newPassword').value = '';
+                document.getElementById('confirmPassword').value = '';
+                logout();
+            } else {
+                alert(data.msg);
+            }
+        }
+
+        // ========== 订单详情 ==========
+        async function viewOrder(tradeNo) {
+            const data = await api('/admin/api/orders/' + tradeNo);
+            if (data.code !== 1) {
+                alert(data.msg || '获取订单失败');
+                return;
+            }
+            const order = data.data;
+            const payType = order.type || order.chain || '-';
+            const isPassive = payType === 'wechat' || payType === 'alipay';
+            const isTRX = payType === 'trx';
+            const receivedAmount = isPassive ? `¥${order.money}` : (isTRX ? `${order.usdt_amount || '-'} TRX` : `${order.usdt_amount || '-'} USDT`);
+
+            let statusText = '待支付';
+            switch(order.status) {
+                case 1: statusText = '已支付'; break;
+                case 2: statusText = '已过期'; break;
+                case 3: statusText = '已取消'; break;
+            }
+
+            document.getElementById('modalTitle').textContent = '订单详情';
+            document.getElementById('modalBody').innerHTML = `
+                <table style="width:100%;">
+                    <tr><td style="padding:8px;color:#666;">交易号:</td><td style="padding:8px;">${order.trade_no}</td></tr>
+                    <tr><td style="padding:8px;color:#666;">商户订单号:</td><td style="padding:8px;">${order.out_trade_no}</td></tr>
+                    <tr><td style="padding:8px;color:#666;">商品名称:</td><td style="padding:8px;">${order.name || '-'}</td></tr>
+                    <tr><td style="padding:8px;color:#666;">支付方式:</td><td style="padding:8px;">${getPaymentTypeBadge(payType)}</td></tr>
+                    <tr><td style="padding:8px;color:#666;">订单金额:</td><td style="padding:8px;">¥${order.money}</td></tr>
+                    <tr><td style="padding:8px;color:#666;">实收金额:</td><td style="padding:8px;">${receivedAmount}</td></tr>
+                    <tr><td style="padding:8px;color:#666;">汇率:</td><td style="padding:8px;">${order.rate || '-'}</td></tr>
+                    <tr><td style="padding:8px;color:#666;">状态:</td><td style="padding:8px;">${getStatusBadge(order.status)}</td></tr>
+                    <tr><td style="padding:8px;color:#666;">收款地址:</td><td style="padding:8px;font-size:12px;word-break:break-all;">${order.to_address || '-'}</td></tr>
+                    <tr><td style="padding:8px;color:#666;">交易哈希:</td><td style="padding:8px;font-size:12px;word-break:break-all;">${order.tx_hash || '-'}</td></tr>
+                    <tr><td style="padding:8px;color:#666;">回调URL:</td><td style="padding:8px;font-size:12px;word-break:break-all;">${order.notify_url || '-'}</td></tr>
+                    <tr><td style="padding:8px;color:#666;">回调状态:</td><td style="padding:8px;">${order.notify_status === 1 ? '<span class="badge badge-success">成功</span>' : `<span class="badge badge-warning">待通知(${order.notify_count || 0}次)</span>`}</td></tr>
+                    <tr><td style="padding:8px;color:#666;">创建时间:</td><td style="padding:8px;">${order.created_at}</td></tr>
+                    <tr><td style="padding:8px;color:#666;">支付时间:</td><td style="padding:8px;">${order.paid_at || '-'}</td></tr>
+                </table>
+                <div style="margin-top:20px;display:flex;gap:10px;">
+                    ${(order.status === 0 || order.status === 2) ? `<button class="btn btn-primary btn-sm" onclick="markOrderPaid('${order.trade_no}')" data-i18n="adminPage.orders.manualConfirm">手动确认</button>` : ''}
+                    ${order.status === 1 && order.notify_status !== 1 ? `<button class="btn btn-sm" style="background:#ff9800;color:white;" onclick="retryNotify('${order.trade_no}')" data-i18n="adminPage.orders.retryNotify">重新通知</button>` : ''}
+                </div>
+            `;
+            document.getElementById('modal').classList.add('show');
+        }
+
+        async function markOrderPaid(tradeNo) {
+            const txHash = prompt('交易哈希(可选):');
+            const amount = prompt('实收金额(USDT):');
+            if (!amount) {
+                alert('请输入实收金额');
+                return;
+            }
+            const data = await api(`/admin/api/orders/${tradeNo}/paid`, {
+                method: 'POST',
+                body: JSON.stringify({ tx_hash: txHash || '', amount: amount })
+            });
+            if (data.code === 1) {
+                alert('标记成功');
+                closeModal();
+                loadOrders();
+            } else {
+                alert(data.msg);
+            }
+        }
+
+        async function retryNotify(tradeNo) {
+            const data = await api(`/admin/api/orders/${tradeNo}/notify`, { method: 'POST' });
+            if (data.code === 1) {
+                alert('已触发通知');
+            } else {
+                alert(data.msg);
+            }
+        }
+
+        // ========== APP版本管理 ==========
+        let appVersionsPage = 1;
+        async function loadAppVersions(page = 1) {
+            appVersionsPage = page;
+            const data = await api(`/admin/api/app-versions?page=${page}`);
+            if (data.code === 1) {
+                const tbody = document.getElementById('appVersionsTable');
+                let html = '';
+                for (const v of data.data.list || []) {
+                    const time = new Date(v.created_at).toLocaleString('zh-CN');
+                    const size = (v.file_size / 1024 / 1024).toFixed(2) + ' MB';
+                    const forceUpdate = v.force_update ? '<span class="badge badge-danger">是</span>' : '<span class="badge badge-success">否</span>';
+                    const statusBadge = v.status === 1 ? '<span class="badge badge-success">启用</span>' : '<span class="badge badge-warning">禁用</span>';
+                    html += `
+                        <tr>
+                            <td>${v.version_code}</td>
+                            <td>${v.version_name}</td>
+                            <td>${size}</td>
+                            <td>${v.downloads}</td>
+                            <td>${forceUpdate}</td>
+                            <td>${statusBadge}</td>
+                            <td>${time}</td>
+                            <td>
+                                <button class="btn btn-sm btn-primary" onclick="viewAppVersion(${v.id})">查看</button>
+                                <button class="btn btn-sm" style="background:#f44336;color:white;" onclick="deleteAppVersion(${v.id})">删除</button>
+                            </td>
+                        </tr>
+                    `;
+                }
+                tbody.innerHTML = html || '<tr><td colspan="8" style="text-align:center;">暂无数据</td></tr>';
+
+                // 分页
+                const totalPages = Math.ceil((data.data.total || 0) / 20);
+                let paginationHtml = '';
+                if (totalPages > 1) {
+                    if (page > 1) paginationHtml += `<button onclick="loadAppVersions(${page - 1})">上一页</button>`;
+                    paginationHtml += ` 第 ${page} / ${totalPages} 页 `;
+                    if (page < totalPages) paginationHtml += `<button onclick="loadAppVersions(${page + 1})">下一页</button>`;
+                }
+                document.getElementById('appVersionsPagination').innerHTML = paginationHtml;
+            }
+        }
+
+        function showUploadAppModal() {
+            document.getElementById('modalTitle').textContent = '上传新版本';
+            document.getElementById('modalBody').innerHTML = `
+                <form id="uploadAppForm" enctype="multipart/form-data">
+                    <div class="form-group">
+                        <label>版本号 (数字，用于比较更新)</label>
+                        <input type="number" id="appVersionCode" required placeholder="如: 1, 2, 3...">
+                    </div>
+                    <div class="form-group">
+                        <label>版本名称</label>
+                        <input type="text" id="appVersionName" required placeholder="如: 1.0.0">
+                    </div>
+                    <div class="form-group">
+                        <label>APK文件</label>
+                        <input type="file" id="appFile" accept=".apk" required>
+                    </div>
+                    <div class="form-group">
+                        <label>更新日志</label>
+                        <textarea id="appChangelog" rows="4" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;" placeholder="请输入更新内容..."></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label><input type="checkbox" id="appForceUpdate"> 强制更新</label>
+                    </div>
+                    <button type="button" class="btn btn-primary" onclick="uploadAppVersion()">上传</button>
+                </form>
+            `;
+            document.getElementById('modal').classList.add('show');
+        }
+
+        async function uploadAppVersion() {
+            const versionCode = document.getElementById('appVersionCode').value;
+            const versionName = document.getElementById('appVersionName').value;
+            const file = document.getElementById('appFile').files[0];
+            const changelog = document.getElementById('appChangelog').value;
+            const forceUpdate = document.getElementById('appForceUpdate').checked;
+
+            if (!versionCode || !versionName || !file) {
+                alert('请填写版本号、版本名称并选择APK文件');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('version_code', versionCode);
+            formData.append('version_name', versionName);
+            formData.append('file', file);
+            formData.append('changelog', changelog);
+            formData.append('force_update', forceUpdate ? '1' : '0');
+
+            try {
+                const res = await fetch('/admin/api/app-versions', {
+                    method: 'POST',
+                    headers: { 'Authorization': 'Bearer ' + token },
+                    body: formData
+                });
+                const data = await res.json();
+                if (data.code === 1) {
+                    alert('上传成功');
+                    closeModal();
+                    loadAppVersions();
+                } else {
+                    alert(data.msg);
+                }
+            } catch (e) {
+                alert('上传失败: ' + e.message);
+            }
+        }
+
+        async function viewAppVersion(id) {
+            const data = await api('/admin/api/app-versions');
+            if (data.code === 1) {
+                const v = (data.data.list || []).find(x => x.id === id);
+                if (!v) {
+                    alert('版本不存在');
+                    return;
+                }
+                const size = (v.file_size / 1024 / 1024).toFixed(2) + ' MB';
+                document.getElementById('modalTitle').textContent = '版本详情';
+                document.getElementById('modalBody').innerHTML = `
+                    <table style="width:100%;">
+                        <tr><td style="padding:8px;color:#666;">版本号:</td><td style="padding:8px;">${v.version_code}</td></tr>
+                        <tr><td style="padding:8px;color:#666;">版本名:</td><td style="padding:8px;">${v.version_name}</td></tr>
+                        <tr><td style="padding:8px;color:#666;">文件大小:</td><td style="padding:8px;">${size}</td></tr>
+                        <tr><td style="padding:8px;color:#666;">下载次数:</td><td style="padding:8px;">${v.downloads}</td></tr>
+                        <tr><td style="padding:8px;color:#666;">MD5:</td><td style="padding:8px;font-size:12px;">${v.md5}</td></tr>
+                        <tr><td style="padding:8px;color:#666;">更新日志:</td><td style="padding:8px;white-space:pre-wrap;">${v.changelog || '-'}</td></tr>
+                        <tr><td style="padding:8px;color:#666;">强制更新:</td><td style="padding:8px;">${v.force_update ? '是' : '否'}</td></tr>
+                        <tr><td style="padding:8px;color:#666;">状态:</td><td style="padding:8px;">${v.status === 1 ? '启用' : '禁用'}</td></tr>
+                        <tr><td style="padding:8px;color:#666;">下载地址:</td><td style="padding:8px;font-size:12px;"><a href="${v.file_path}" target="_blank">${v.file_path}</a></td></tr>
+                    </table>
+                    <div style="margin-top:16px;display:flex;gap:10px;">
+                        <button class="btn btn-sm btn-primary" onclick="toggleAppVersionStatus(${v.id}, ${v.status === 1 ? 0 : 1})">${v.status === 1 ? '禁用' : '启用'}</button>
+                        <button class="btn btn-sm" style="background:${v.force_update ? '#4caf50' : '#ff9800'};color:white;" onclick="toggleAppForceUpdate(${v.id}, ${v.force_update ? 'false' : 'true'})">${v.force_update ? '取消强制更新' : '设为强制更新'}</button>
+                    </div>
+                `;
+                document.getElementById('modal').classList.add('show');
+            }
+        }
+
+        async function toggleAppVersionStatus(id, status) {
+            const data = await api(`/admin/api/app-versions/${id}`, {
+                method: 'PUT',
+                body: JSON.stringify({ status: status })
+            });
+            if (data.code === 1) {
+                alert('更新成功');
+                closeModal();
+                loadAppVersions();
+            } else {
+                alert(data.msg);
+            }
+        }
+
+        async function toggleAppForceUpdate(id, forceUpdate) {
+            const data = await api(`/admin/api/app-versions/${id}`, {
+                method: 'PUT',
+                body: JSON.stringify({ force_update: forceUpdate === 'true' })
+            });
+            if (data.code === 1) {
+                alert('更新成功');
+                closeModal();
+                loadAppVersions();
+            } else {
+                alert(data.msg);
+            }
+        }
+
+        async function deleteAppVersion(id) {
+            if (!confirm('确定要删除此版本吗？此操作不可恢复！')) return;
+            const data = await api(`/admin/api/app-versions/${id}`, { method: 'DELETE' });
+            if (data.code === 1) {
+                alert('删除成功');
+                loadAppVersions();
+            } else {
+                alert(data.msg);
+            }
+        }
+
+        // 页面标题映射
+        const pageTitleMap = {
+            'dashboard': 'admin.dashboard',
+            'chains': 'admin.chains',
+            'merchants': 'admin.merchants',
+            'wallets': 'admin.wallets',
+            'orders': 'admin.orders',
+            'api-logs': 'admin.apiLogs',
+            'ip-blacklist': 'admin.ipBlacklist',
+            'withdrawals': 'admin.withdrawals',
+            'withdraw-addresses': 'admin.withdrawAddresses',
+            'app-versions': 'admin.appVersions',
+            'settings': 'admin.settings',
+            'password': 'auth.changePassword'
+        };
+
+        // 更新页面标题
+        function updatePageTitleI18n(page) {
+            const titleKey = pageTitleMap[page] || 'admin.dashboard';
+            const titleEl = document.getElementById('pageTitle');
+            if (titleEl && typeof $t === 'function') {
+                titleEl.textContent = $t(titleKey);
+            }
+        }
+
+    </script>
+    <script src="/static/js/i18n.js?v=2"></script>
+    <script>
+        // 初始化国际化
+        I18n.init().then(() => {
+            // 创建语言选择器
+            I18n.createLanguageSelector('loginLangSelector', 'light');
+            I18n.createLanguageSelector('headerLangSelector', 'light');
+        });
+
+        // 监听语言变化，重新翻译页面
+        window.addEventListener('localeChanged', function() {
+            // 更新当前页面标题
+            const activePage = document.querySelector('.menu-item.active');
+            if (activePage) {
+                updatePageTitleI18n(activePage.dataset.page);
+            }
+        });
+    </script>
+</body>
+</html>

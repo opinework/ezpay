@@ -1,0 +1,326 @@
+/**
+ * EzPay i18n Styles
+ * RTL support and language selector
+ */
+
+/* ============================================
+   Language Selector
+   ============================================ */
+.lang-selector {
+    position: relative;
+    display: inline-block;
+}
+
+.lang-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 12px;
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 6px;
+    color: inherit;
+    font-size: 14px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.lang-btn:hover {
+    background: rgba(255, 255, 255, 0.2);
+}
+
+.lang-icon {
+    font-size: 16px;
+}
+
+.lang-menu {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    margin-top: 4px;
+    min-width: 140px;
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(-10px);
+    transition: all 0.2s;
+    z-index: 1000;
+}
+
+.lang-menu.show {
+    opacity: 1;
+    visibility: visible;
+    transform: translateY(0);
+}
+
+/* Language menu - upward direction (for bottom-positioned selectors) */
+.lang-selector.up .lang-menu {
+    top: auto;
+    bottom: 100%;
+    margin-top: 0;
+    margin-bottom: 4px;
+    transform: translateY(10px);
+}
+
+.lang-selector.up .lang-menu.show {
+    transform: translateY(0);
+}
+
+.lang-option {
+    display: block;
+    padding: 10px 16px;
+    color: #333;
+    text-decoration: none;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.lang-option:hover {
+    background: #f5f5f5;
+}
+
+.lang-option.active {
+    background: #667eea;
+    color: white;
+}
+
+.lang-option:first-child {
+    border-radius: 8px 8px 0 0;
+}
+
+.lang-option:last-child {
+    border-radius: 0 0 8px 8px;
+}
+
+/* Dark theme language selector */
+.lang-selector.dark .lang-btn {
+    background: rgba(0, 0, 0, 0.2);
+    border-color: rgba(255, 255, 255, 0.1);
+    color: white;
+}
+
+.lang-selector.dark .lang-btn:hover {
+    background: rgba(0, 0, 0, 0.3);
+}
+
+/* Light theme language selector */
+.lang-selector.light .lang-btn {
+    background: #f5f5f5;
+    border-color: #ddd;
+    color: #333;
+}
+
+.lang-selector.light .lang-btn:hover {
+    background: #eee;
+}
+
+/* Compact language selector */
+.lang-selector.compact .lang-btn {
+    padding: 6px 10px;
+    font-size: 12px;
+}
+
+.lang-selector.compact .lang-current {
+    display: none;
+}
+
+/* ============================================
+   RTL (Right-to-Left) Support
+   ============================================ */
+[dir="rtl"] {
+    direction: rtl;
+    text-align: right;
+}
+
+/* Flex direction */
+[dir="rtl"] .flex-row,
+body.rtl .flex-row {
+    flex-direction: row-reverse;
+}
+
+/* Margins and Paddings */
+[dir="rtl"] .ml-auto,
+body.rtl .ml-auto {
+    margin-left: 0;
+    margin-right: auto;
+}
+
+[dir="rtl"] .mr-auto,
+body.rtl .mr-auto {
+    margin-right: 0;
+    margin-left: auto;
+}
+
+/* Text alignment */
+[dir="rtl"] .text-left,
+body.rtl .text-left {
+    text-align: right;
+}
+
+[dir="rtl"] .text-right,
+body.rtl .text-right {
+    text-align: left;
+}
+
+/* Icons */
+[dir="rtl"] .icon-left,
+body.rtl .icon-left {
+    margin-left: 8px;
+    margin-right: 0;
+}
+
+[dir="rtl"] .icon-right,
+body.rtl .icon-right {
+    margin-right: 8px;
+    margin-left: 0;
+}
+
+/* Menu items */
+[dir="rtl"] .menu-icon,
+body.rtl .menu-icon {
+    margin-left: 12px;
+    margin-right: 0;
+}
+
+/* Sidebar */
+[dir="rtl"] .sidebar,
+body.rtl .sidebar {
+    left: auto;
+    right: 0;
+}
+
+[dir="rtl"] .main-content,
+body.rtl .main-content {
+    margin-left: 0;
+    margin-right: 240px;
+}
+
+/* Tables */
+[dir="rtl"] th,
+[dir="rtl"] td,
+body.rtl th,
+body.rtl td {
+    text-align: right;
+}
+
+/* Form elements */
+[dir="rtl"] input,
+[dir="rtl"] textarea,
+[dir="rtl"] select,
+body.rtl input,
+body.rtl textarea,
+body.rtl select {
+    text-align: right;
+}
+
+/* Lists */
+[dir="rtl"] ul,
+[dir="rtl"] ol,
+body.rtl ul,
+body.rtl ol {
+    padding-left: 0;
+    padding-right: 16px;
+}
+
+/* Language menu position for RTL */
+[dir="rtl"] .lang-menu,
+body.rtl .lang-menu {
+    right: auto;
+    left: 0;
+}
+
+/* Filter bar */
+[dir="rtl"] .filter-bar,
+body.rtl .filter-bar {
+    flex-direction: row-reverse;
+}
+
+/* Info rows */
+[dir="rtl"] .info-row,
+body.rtl .info-row {
+    flex-direction: row-reverse;
+}
+
+/* Address container */
+[dir="rtl"] .address,
+body.rtl .address {
+    direction: ltr;
+    text-align: left;
+}
+
+/* Chain badge */
+[dir="rtl"] .chain-info,
+body.rtl .chain-info {
+    flex-direction: row-reverse;
+}
+
+/* Stats grid */
+[dir="rtl"] .stats-grid,
+body.rtl .stats-grid {
+    direction: rtl;
+}
+
+/* Card header */
+[dir="rtl"] .card-header,
+body.rtl .card-header {
+    flex-direction: row-reverse;
+}
+
+/* Header */
+[dir="rtl"] .header,
+body.rtl .header {
+    flex-direction: row-reverse;
+}
+
+/* Buttons with icons */
+[dir="rtl"] .btn i,
+body.rtl .btn i {
+    margin-left: 8px;
+    margin-right: 0;
+}
+
+/* Modal */
+[dir="rtl"] .modal-header,
+body.rtl .modal-header {
+    flex-direction: row-reverse;
+}
+
+/* Countdown */
+[dir="rtl"] .countdown-time,
+body.rtl .countdown-time {
+    direction: ltr;
+}
+
+/* ============================================
+   Persian/Arabic specific styles
+   ============================================ */
+[lang="fa"] {
+    font-family: 'Vazirmatn', 'Tahoma', Arial, sans-serif;
+}
+
+[lang="ar"] {
+    font-family: 'Cairo', 'Tahoma', Arial, sans-serif;
+}
+
+/* Numbers should stay LTR */
+.ltr-number,
+[dir="rtl"] .amount,
+[dir="rtl"] .value,
+body.rtl .amount,
+body.rtl .value {
+    direction: ltr;
+    display: inline-block;
+}
+
+/* ============================================
+   Transitions for language switching
+   ============================================ */
+.i18n-fade {
+    transition: opacity 0.2s ease-in-out;
+}
+
+.i18n-fade.changing {
+    opacity: 0.5;
+}

@@ -1,0 +1,566 @@
+{
+  "common": {
+    "appName": "EzPay",
+    "loading": "Loading...",
+    "confirm": "Confirm",
+    "cancel": "Cancel",
+    "save": "Save",
+    "delete": "Delete",
+    "edit": "Edit",
+    "add": "Add",
+    "search": "Search",
+    "reset": "Reset",
+    "export": "Export",
+    "refresh": "Refresh",
+    "close": "Close",
+    "submit": "Submit",
+    "back": "Back",
+    "yes": "Yes",
+    "no": "No",
+    "success": "Success",
+    "failed": "Failed",
+    "error": "Error",
+    "warning": "Warning",
+    "info": "Info",
+    "all": "All",
+    "enable": "Enable",
+    "disable": "Disable",
+    "enabled": "Enabled",
+    "disabled": "Disabled",
+    "status": "Status",
+    "action": "Action",
+    "copy": "Copy",
+    "copied": "Copied",
+    "view": "View",
+    "detail": "Detail",
+    "more": "More",
+    "total": "Total",
+    "page": "Page",
+    "previous": "Previous",
+    "next": "Next"
+  },
+  "auth": {
+    "login": "Login",
+    "logout": "Logout",
+    "username": "Username",
+    "password": "Password",
+    "oldPassword": "Old Password",
+    "newPassword": "New Password",
+    "confirmPassword": "Confirm Password",
+    "changePassword": "Change Password",
+    "loginSuccess": "Login successful",
+    "loginFailed": "Login failed",
+    "logoutSuccess": "Logged out",
+    "passwordChanged": "Password changed successfully",
+    "passwordMismatch": "Passwords do not match",
+    "invalidCredentials": "Invalid username or password"
+  },
+  "admin": {
+    "title": "EzPay Admin",
+    "dashboard": "Dashboard",
+    "merchants": "Merchants",
+    "wallets": "Wallets",
+    "orders": "Orders",
+    "apiLogs": "API Logs",
+    "ipBlacklist": "IP Blacklist",
+    "withdrawals": "Withdrawals",
+    "withdrawAddresses": "Withdrawal Addresses",
+    "appVersions": "App Versions",
+    "settings": "Settings",
+    "chains": "Chain Monitor",
+    "blockchainStatus": "Blockchain Monitor Status"
+  },
+  "adminPage": {
+    "modal": {
+      "title": "Title"
+    },
+    "orders": {
+      "list": "Order List",
+      "testPayment": "Test Payment",
+      "exportCSV": "Export CSV",
+      "cleanInvalid": "Clean Invalid Orders",
+      "manualConfirm": "Manual Confirm",
+      "retryNotify": "Retry Notify",
+      "filter": {
+        "allMerchants": "All Merchants",
+        "allStatus": "All Status",
+        "startDate": "Start Date",
+        "endDate": "End Date"
+      },
+      "tableHeader": {
+        "paymentMethod": "Payment Method",
+        "received": "Received"
+      }
+    },
+    "merchants": {
+      "list": "Merchant List",
+      "merchantPortal": "Merchant Portal",
+      "addMerchant": "Add Merchant"
+    },
+    "wallets": {
+      "list": "Wallet List",
+      "tableHeader": {
+        "label": "Label"
+      }
+    },
+    "chains": {
+      "management": "Chain Monitor Management",
+      "refreshStatus": "Refresh Status",
+      "description": "Dynamically enable or disable chain monitoring to reduce resource overhead for unnecessary chains.",
+      "tableHeader": {
+        "runningStatus": "Running Status",
+        "walletCount": "Wallet Count",
+        "scanInterval": "Scan Interval"
+      }
+    },
+    "apiLogs": {
+      "cleanLogs": "Clean Logs:",
+      "oneDayAgo": "1 Day Ago",
+      "threeDaysAgo": "3 Days Ago",
+      "oneWeekAgo": "1 Week Ago",
+      "oneMonthAgo": "1 Month Ago",
+      "filter": {
+        "merchantPid": "Merchant PID",
+        "allEndpoints": "All Endpoints",
+        "allStatus": "All Status",
+        "other": "Other",
+        "tradeNo": "Trade No"
+      },
+      "tableHeader": {
+        "merchantPid": "Merchant PID",
+        "message": "Message",
+        "tradeNo": "Trade No"
+      }
+    },
+    "settings": {
+      "systemWalletFeeRate": "System Wallet Fee Rate",
+      "personalWalletFeeRate": "Personal Wallet Fee Rate",
+      "feeRatePlaceholder": "e.g. 0.02 for 2%",
+      "systemWalletFeeRateDesc": "Fee rate when using system wallet, fee deducted from amount before crediting merchant balance",
+      "personalWalletFeeRateDesc": "Fee rate when using personal wallet, payment goes directly to merchant, fee deducted from balance",
+      "telegramBotSettings": "Telegram Bot Settings",
+      "botTokenPlaceholder": "Get from @BotFather",
+      "botTokenDesc": "Search @BotFather on Telegram, send /newbot to create a bot and get Token",
+      "botUsername": "Bot Username",
+      "botUsernamePlaceholder": "e.g. @YourBotName",
+      "botUsernameDesc": "Bot username for merchants to find and bind (include @ symbol)",
+      "customerServiceSettings": "Customer Service Settings",
+      "telegramService": "Telegram Support",
+      "telegramServicePlaceholder": "e.g. https://t.me/your_service",
+      "telegramServiceDesc": "Telegram support link shown during merchant recharge",
+      "discordService": "Discord Support",
+      "discordServicePlaceholder": "e.g. https://discord.gg/xxxxx",
+      "discordServiceDesc": "Discord support link shown during merchant recharge",
+      "testTelegram": "Test Telegram Connection"
+    },
+    "withdrawals": {
+      "statusToPay": "To Pay",
+      "filter": {
+        "allStatus": "All Status"
+      },
+      "tableHeader": {
+        "merchant": "Merchant",
+        "method": "Method",
+        "account": "Account"
+      }
+    },
+    "withdrawAddresses": {
+      "title": "Withdrawal Address Review",
+      "statusPending": "Pending",
+      "statusApproved": "Approved",
+      "statusRejected": "Rejected",
+      "filter": {
+        "allStatus": "All Status"
+      },
+      "tableHeader": {
+        "merchant": "Merchant",
+        "chainType": "Chain Type",
+        "remark": "Remark",
+        "submitTime": "Submit Time"
+      }
+    },
+    "appVersions": {
+      "uploadNew": "Upload New Version",
+      "tableHeader": {
+        "fileSize": "File Size",
+        "downloadCount": "Downloads"
+      }
+    },
+    "password": {
+      "oldPasswordPlaceholder": "Enter current password",
+      "newPasswordPlaceholder": "Enter new password (min 6 chars)",
+      "confirmPasswordPlaceholder": "Confirm new password"
+    },
+    "ipBlacklist": {
+      "searchIP": "Search IP",
+      "tableHeader": {
+        "source": "Source",
+        "addTime": "Added Time"
+      }
+    }
+  },
+  "dashboard": {
+    "todayOrders": "Today's Orders",
+    "todayUSDT": "Today's Revenue (USDT)",
+    "currentRate": "Current Rate",
+    "pendingOrders": "Pending Orders",
+    "dataTrend": "Data Trend",
+    "today": "Today",
+    "week": "1 Week",
+    "month": "1 Month",
+    "threeMonths": "3 Months",
+    "ordersTrend": "Orders Trend",
+    "amountTrend": "Amount Trend (CNY)",
+    "topMerchantsByAmount": "Top 5 Merchants by Amount",
+    "topMerchantsByOrders": "Top 5 Merchants by Orders",
+    "rank": "Rank",
+    "merchant": "Merchant",
+    "amount": "Amount (CNY)",
+    "orderCount": "Orders"
+  },
+  "merchant": {
+    "title": "EzPay Merchant Portal",
+    "pid": "Merchant ID",
+    "name": "Merchant Name",
+    "balance": "Balance",
+    "rate": "Fee Rate",
+    "status": "Status",
+    "createTime": "Created At",
+    "apiKey": "API Key",
+    "resetKey": "Reset Key",
+    "adjustBalance": "Adjust Balance",
+    "walletMode": "Wallet Mode",
+    "globalWallet": "Use Global Wallet",
+    "ownWallet": "Use Own Wallet",
+    "notifyUrl": "Callback URL",
+    "profile": "Profile",
+    "myOrders": "My Orders",
+    "myWallets": "My Wallets",
+    "withdrawal": "Withdrawal",
+    "recharge": "Recharge"
+  },
+  "wallet": {
+    "address": "Wallet Address",
+    "chain": "Chain/Network",
+    "merchant": "Merchant",
+    "global": "Global Wallet",
+    "qrcode": "QR Code",
+    "uploadQrcode": "Upload QR Code",
+    "addWallet": "Add Wallet",
+    "editWallet": "Edit Wallet",
+    "deleteConfirm": "Are you sure you want to delete this wallet?"
+  },
+  "order": {
+    "tradeNo": "Order No",
+    "outTradeNo": "Merchant Order No",
+    "merchantName": "Merchant",
+    "productName": "Product Name",
+    "amount": "Amount (CNY)",
+    "usdtAmount": "Amount (USDT)",
+    "chain": "Payment Channel",
+    "status": "Status",
+    "statusPending": "Pending",
+    "statusPaid": "Paid",
+    "statusExpired": "Expired",
+    "statusClosed": "Closed",
+    "createTime": "Created At",
+    "paidTime": "Paid At",
+    "markPaid": "Mark as Paid",
+    "retryNotify": "Retry Notification",
+    "testOrder": "Test Order",
+    "cleanExpired": "Clean Expired Orders",
+    "notifyStatus": "Notification Status",
+    "notifySuccess": "Notification Sent",
+    "notifyFailed": "Notification Failed",
+    "notifyPending": "Pending Notification"
+  },
+  "cashier": {
+    "title": "Payment",
+    "paymentMethod": "Payment Method",
+    "network": "Network",
+    "remainingTime": "Time Remaining",
+    "expired": "Expired",
+    "scanToPay": "Scan to Pay",
+    "paymentAddress": "Payment Address (Please verify network)",
+    "copyAddress": "Copy Address",
+    "addressCopied": "Address Copied",
+    "orderNo": "Order No",
+    "productName": "Product Name",
+    "exchangeRate": "Exchange Rate",
+    "waitingPayment": "Waiting for payment...",
+    "paymentSuccess": "Payment Successful",
+    "redirecting": "Redirecting...",
+    "orderExpired": "Order Expired",
+    "pleaseRetry": "Please try again",
+    "paymentTips": "Payment Tips",
+    "wechatPay": "WeChat Pay",
+    "alipay": "Alipay",
+    "usdtPay": "USDT Payment",
+    "trxPay": "TRX Payment",
+    "tips": {
+      "wechat": {
+        "scan": "Please scan the QR code with WeChat",
+        "amount": "Please transfer the exact amount",
+        "wait": "Please wait for confirmation after transfer"
+      },
+      "alipay": {
+        "scan": "Please scan the QR code with Alipay",
+        "amount": "Please transfer the exact amount",
+        "wait": "Please wait for confirmation after transfer"
+      },
+      "crypto": {
+        "network": "Please make sure the transfer network is",
+        "amount": "Please transfer the exact amount",
+        "exchangeFee": "When withdrawing from exchange, add withdrawal fee to transfer amount",
+        "wait": "Please wait for confirmation after transfer"
+      },
+      "dontClose": "Do not close this page, it will redirect automatically on success"
+    }
+  },
+  "withdrawal": {
+    "title": "Withdrawal Management",
+    "amount": "Withdrawal Amount",
+    "address": "Withdrawal Address",
+    "chain": "Withdrawal Network",
+    "fee": "Fee",
+    "actualAmount": "Actual Amount",
+    "status": "Status",
+    "statusPending": "Pending Review",
+    "statusApproved": "Approved",
+    "statusRejected": "Rejected",
+    "statusCompleted": "Completed",
+    "approve": "Approve",
+    "reject": "Reject",
+    "complete": "Complete",
+    "txHash": "Transaction Hash",
+    "createTime": "Applied At",
+    "processTime": "Processed At",
+    "applyWithdraw": "Apply for Withdrawal",
+    "availableBalance": "Available Balance"
+  },
+  "chain": {
+    "title": "Chain Monitor",
+    "name": "Chain Name",
+    "status": "Status",
+    "running": "Running",
+    "stopped": "Stopped",
+    "lastBlock": "Latest Block",
+    "walletCount": "Wallet Count",
+    "enable": "Enable",
+    "disable": "Disable",
+    "batchEnable": "Batch Enable",
+    "batchDisable": "Batch Disable"
+  },
+  "settings": {
+    "title": "System Settings",
+    "telegram": "Telegram Notifications",
+    "botToken": "Bot Token",
+    "testBot": "Test Bot",
+    "rateMode": "Rate Mode",
+    "rateAuto": "Auto Fetch",
+    "rateManual": "Manual",
+    "rateHybrid": "Hybrid",
+    "manualRate": "Manual Rate",
+    "floatPercent": "Rate Float Percentage",
+    "orderExpire": "Order Expiry (minutes)",
+    "notifyRetry": "Notification Retries",
+    "saveSuccess": "Settings saved successfully"
+  },
+  "apiLog": {
+    "title": "API Call Logs",
+    "ip": "IP Address",
+    "method": "Method",
+    "path": "Path",
+    "statusCode": "Status Code",
+    "duration": "Duration",
+    "time": "Time",
+    "blockIP": "Block IP",
+    "clean": "Clean Logs"
+  },
+  "ipBlacklist": {
+    "title": "IP Blacklist",
+    "ip": "IP Address",
+    "reason": "Reason",
+    "expireTime": "Expire Time",
+    "permanent": "Permanent",
+    "addIP": "Add IP",
+    "remove": "Remove"
+  },
+  "appVersion": {
+    "title": "App Version Management",
+    "version": "Version",
+    "versionCode": "Version Code",
+    "description": "Description",
+    "forceUpdate": "Force Update",
+    "downloadUrl": "Download URL",
+    "uploadApk": "Upload APK",
+    "releaseTime": "Release Time"
+  },
+  "error": {
+    "title": "Error",
+    "notFound": "Page not found",
+    "serverError": "Server error",
+    "networkError": "Network error, please retry",
+    "unauthorized": "Unauthorized, please login again",
+    "forbidden": "Access denied",
+    "invalidParams": "Invalid parameters",
+    "backToHome": "Back to Home"
+  },
+  "success": {
+    "title": "Success",
+    "message": "Operation completed successfully",
+    "backToHome": "Back to Home"
+  },
+  "time": {
+    "second": "second",
+    "minute": "minute",
+    "hour": "hour",
+    "day": "day",
+    "ago": "ago",
+    "later": "later"
+  },
+  "merchantPage": {
+    "login": {
+      "pidPlaceholder": "Enter Merchant PID",
+      "passwordPlaceholder": "Enter Password"
+    },
+    "dashboard": {
+      "todayAmount": "Today's Amount",
+      "totalOrders": "Total Orders",
+      "totalAmount": "Total Amount"
+    },
+    "orders": {
+      "paymentPage": "Payment",
+      "confirmPayment": "Confirm Payment"
+    },
+    "pagination": {
+      "items": "items"
+    },
+    "wallets": {
+      "title": "Wallet Management",
+      "addWallet": "Add Wallet",
+      "usageTitle": "Wallet Usage Guide",
+      "usdtDesc": "System automatically monitors on-chain transactions. Add wallet address to start receiving payments. Supports TRC20, ERC20, BSC and more.",
+      "wechatAlipayDesc": "Requires VMQ Monitor App installed on phone to monitor payment notifications and push to server for order matching.",
+      "chainDisabled": "Chain Disabled",
+      "unnamed": "Unnamed"
+    },
+    "chains": {
+      "title": "Chain Status",
+      "desc": "Chain monitoring is controlled by admin. You can only view current status. Disabled chains cannot receive payments."
+    },
+    "apikey": {
+      "title": "API Key",
+      "pid": "Merchant PID",
+      "secretKey": "Merchant Secret",
+      "resetKey": "Reset Key",
+      "resetKeyWarning": "After reset, the old key will be invalidated immediately"
+    },
+    "withdraw": {
+      "title": "Withdrawal Management",
+      "balance": "Account Balance (USDT)",
+      "frozenBalance": "Frozen Balance (USDT)",
+      "availableBalance": "Available Balance (USDT)",
+      "recharge": "Recharge Balance",
+      "rechargeDesc": "For fee deduction",
+      "instructions": "Withdrawal Instructions",
+      "minWithdraw": "Minimum Withdrawal",
+      "feePerTx": "Fee",
+      "perTx": "tx",
+      "feeFixed": "Fixed",
+      "supportedChains": "Supported Chains",
+      "addressNeedApproval": "Withdrawal address must be added in settings and approved first",
+      "applyWithdraw": "Apply for Withdrawal",
+      "withdrawAmount": "Withdrawal Amount (USDT)",
+      "withdrawAddress": "Withdrawal Address",
+      "minAmountHint": "Minimum 50 USDT",
+      "selectAddress": "Select withdrawal address",
+      "noAddressHint": "No available address, please add one in settings first",
+      "fullAddress": "Full Address",
+      "remarkOptional": "Remark (Optional)",
+      "remarkPlaceholder": "Remark",
+      "actualReceive": "Actual Receive",
+      "feeAmount": "Fee",
+      "submitApply": "Submit Application",
+      "withdrawHistory": "Withdrawal History",
+      "noRecords": "No withdrawal records"
+    },
+    "settings": {
+      "title": "Merchant Settings",
+      "basicInfo": "Basic Information",
+      "merchantName": "Merchant Name",
+      "contactEmail": "Contact Email",
+      "asyncNotifyUrl": "Async Notify URL",
+      "syncReturnUrl": "Sync Return URL",
+      "saveChanges": "Save Changes",
+      "changePassword": "Change Password",
+      "currentPassword": "Current Password",
+      "newPassword": "New Password",
+      "walletMode": "Wallet Mode",
+      "walletModeDesc": "Choose wallet type for receiving payments",
+      "systemWalletOnly": "System Wallet Only",
+      "systemWalletDesc": "Use only admin-configured system wallets",
+      "personalWalletOnly": "Personal Wallet Only",
+      "personalWalletDesc": "Use only your own wallets",
+      "bothWallets": "Both (Recommended)",
+      "bothWalletsDesc": "Prefer personal wallet, fallback to system wallet",
+      "separateBilling": "Separate Billing",
+      "byActualUsage": "By Usage",
+      "feeRate": "Fee Rate",
+      "feeExplanation": "Fee Explanation",
+      "systemWalletFeeDesc": "Fee deducted from payment before crediting to balance",
+      "personalWalletFeeDesc": "Payment goes directly to your account, fee deducted from balance",
+      "mixedModeFeeDesc": "Billed separately based on wallet type used",
+      "saveWalletMode": "Save Wallet Mode",
+      "telegramNotify": "Telegram Notifications",
+      "telegramBound": "Telegram Bound",
+      "telegramNotEnabled": "Telegram Not Enabled",
+      "telegramNotEnabledDesc": "Admin has not configured Telegram bot. This feature is unavailable.",
+      "telegramNotBound": "Telegram Not Bound",
+      "telegramBindBenefit": "Receive real-time notifications for orders and withdrawals after binding.",
+      "bindMethod": "How to Bind",
+      "notifySettings": "Notification Settings",
+      "orderCreatedNotify": "Order Created Notification",
+      "orderPaidNotify": "Order Paid Notification",
+      "withdrawNotify": "Withdrawal Status Notification",
+      "saveNotifySettings": "Save Notification Settings",
+      "withdrawAddress": "Withdrawal Address Management",
+      "addWithdrawAddress": "Add Withdrawal Address",
+      "chainType": "Chain Type",
+      "address": "Address",
+      "label": "Label",
+      "labelPlaceholder": "Optional, e.g.: Main Account",
+      "submitForReview": "Submit for Review",
+      "yourAddresses": "Your Withdrawal Addresses",
+      "noAddressYet": "No withdrawal addresses yet",
+      "addFirstAddress": "Add Your First Address"
+    },
+    "testPayment": {
+      "title": "Test Payment",
+      "amount": "Amount",
+      "productName": "Product Name",
+      "paymentMethod": "Payment Method",
+      "submit": "Create Order"
+    },
+    "recharge": {
+      "title": "Recharge Balance",
+      "desc": "Recharged amount will be added to your account balance for fee deduction.",
+      "selectChain": "Select Network",
+      "rechargeAddress": "Recharge Address",
+      "copyAddress": "Copy Address",
+      "minRecharge": "Minimum Recharge",
+      "rechargeNotice": "Important Notice",
+      "notice1": "Make sure to use the correct network, wrong transfers cannot be recovered",
+      "notice2": "Recharge requires blockchain confirmation before crediting",
+      "notice3": "Contact support if you have any issues",
+      "contactSupport": "Contact Support"
+    },
+    "status": {
+      "enabled": "Enabled",
+      "disabled": "Disabled",
+      "pending": "Pending",
+      "approved": "Approved",
+      "rejected": "Rejected"
+    }
+  }
+}

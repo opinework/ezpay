@@ -1,0 +1,1758 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title data-i18n-document-title="merchant.title">商户中心 - EzPay</title>
+    <link rel="stylesheet" href="/static/css/i18n.css">
+    <script src="/static/js/tailwind.min.js"></script>
+    <script src="/static/js/vue.global.prod.js"></script>
+    <script src="/static/js/axios.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="/static/js/i18n.js?v=4"></script>
+    <link href="/static/css/remixicon.css" rel="stylesheet">
+    <style>
+        [v-cloak] { display: none; }
+        .fade-enter-active, .fade-leave-active { transition: opacity 0.3s; }
+        .fade-enter-from, .fade-leave-to { opacity: 0; }
+    </style>
+</head>
+<body class="bg-gray-100">
+    <div id="app" v-cloak>
+        <!-- 登录页面 -->
+        <div v-if="!isLoggedIn" class="min-h-screen flex items-center justify-center">
+            <div class="bg-white p-8 rounded-lg shadow-lg w-96">
+                <div class="flex justify-end mb-4"><div id="loginLangSelector"></div></div>
+                <h1 class="text-2xl font-bold text-center mb-6" data-i18n="merchant.title">商户中心</h1>
+                <form @submit.prevent="login">
+                    <div class="mb-4">
+                        <label class="block text-gray-700 text-sm font-bold mb-2" data-i18n="merchant.pid">商户PID</label>
+                        <input v-model="loginForm.pid" type="text"
+                            class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            data-i18n-placeholder="merchantPage.login.pidPlaceholder" placeholder="请输入商户PID" required>
+                    </div>
+                    <div class="mb-6">
+                        <label class="block text-gray-700 text-sm font-bold mb-2" data-i18n="auth.password">密码</label>
+                        <input v-model="loginForm.password" type="password"
+                            class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            data-i18n-placeholder="merchantPage.login.passwordPlaceholder" placeholder="请输入密码" required>
+                    </div>
+                    <button type="submit" :disabled="loading"
+                        class="w-full bg-blue-500 text-white py-2 px-4 rounded-lg hover:bg-blue-600 disabled:opacity-50">
+                        <span v-if="loading" data-i18n="common.loading">登录中...</span>
+                        <span v-else data-i18n="auth.login">登录</span>
+                    </button>
+                </form>
+                <p v-if="loginError" class="mt-4 text-red-500 text-center text-sm">[[ loginError ]]</p>
+            </div>
+        </div>
+
+        <!-- 主界面 -->
+        <div v-else class="min-h-screen">
+            <!-- 侧边栏 - 固定定位 -->
+            <div class="fixed left-0 top-0 w-64 h-screen bg-gray-800 text-white flex flex-col">
+                <div class="p-4 border-b border-gray-700">
+                    <h1 class="text-xl font-bold" data-i18n="merchant.title">EzPay 商户中心</h1>
+                    <p class="text-gray-400 text-sm mt-1">[[ merchant.name || merchant.pid ]]</p>
+                </div>
+                <nav class="mt-4 flex-1 overflow-y-auto">
+                    <a @click="currentTab = 'dashboard'" :class="{'bg-gray-700': currentTab === 'dashboard'}"
+                        class="flex items-center px-4 py-3 cursor-pointer hover:bg-gray-700">
+                        <i class="ri-dashboard-line mr-3"></i> <span data-i18n="admin.dashboard">仪表盘</span>
+                    </a>
+                    <a @click="currentTab = 'chains'" :class="{'bg-gray-700': currentTab === 'chains'}"
+                        class="flex items-center px-4 py-3 cursor-pointer hover:bg-gray-700">
+                        <i class="ri-link mr-3"></i> <span data-i18n="admin.chains">链路状态</span>
+                    </a>
+                    <a @click="currentTab = 'apikey'" :class="{'bg-gray-700': currentTab === 'apikey'}"
+                        class="flex items-center px-4 py-3 cursor-pointer hover:bg-gray-700">
+                        <i class="ri-key-2-line mr-3"></i> <span data-i18n="merchant.apiKey">API密钥</span>
+                    </a>
+                    <a @click="currentTab = 'wallets'" :class="{'bg-gray-700': currentTab === 'wallets'}"
+                        class="flex items-center px-4 py-3 cursor-pointer hover:bg-gray-700">
+                        <i class="ri-wallet-3-line mr-3"></i> <span data-i18n="merchant.myWallets">钱包管理</span>
+                    </a>
+                    <a @click="currentTab = 'orders'" :class="{'bg-gray-700': currentTab === 'orders'}"
+                        class="flex items-center px-4 py-3 cursor-pointer hover:bg-gray-700">
+                        <i class="ri-file-list-3-line mr-3"></i> <span data-i18n="merchant.myOrders">订单管理</span>
+                    </a>
+                    <a @click="currentTab = 'withdraw'" :class="{'bg-gray-700': currentTab === 'withdraw'}"
+                        class="flex items-center px-4 py-3 cursor-pointer hover:bg-gray-700">
+                        <i class="ri-money-cny-circle-line mr-3"></i> <span data-i18n="merchant.withdrawal">提现管理</span>
+                    </a>
+                    <a @click="currentTab = 'settings'" :class="{'bg-gray-700': currentTab === 'settings'}"
+                        class="flex items-center px-4 py-3 cursor-pointer hover:bg-gray-700">
+                        <i class="ri-settings-3-line mr-3"></i> <span data-i18n="admin.settings">商户设置</span>
+                    </a>
+                </nav>
+            </div>
+
+            <!-- 主内容区 - 左边留出侧边栏宽度 -->
+            <div class="ml-64 min-h-screen overflow-auto">
+                <!-- 顶部栏 -->
+                <div class="bg-white shadow px-6 py-3 flex justify-end items-center gap-4 sticky top-0 z-10">
+                    <div id="mainLangSelector"></div>
+                    <button @click="logout" class="flex items-center text-gray-600 hover:text-gray-900">
+                        <i class="ri-logout-box-line mr-1"></i> <span data-i18n="auth.logout">退出登录</span>
+                    </button>
+                </div>
+                <!-- 仪表盘 -->
+                <div v-if="currentTab === 'dashboard'" class="p-6">
+                    <h2 class="text-2xl font-bold mb-6" data-i18n="admin.dashboard">仪表盘</h2>
+                    <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
+                        <div class="bg-white p-6 rounded-lg shadow">
+                            <div class="text-gray-500 text-sm" data-i18n="dashboard.todayOrders">今日订单</div>
+                            <div class="text-3xl font-bold text-blue-600">[[ dashboard.today?.orders || 0 ]]</div>
+                        </div>
+                        <div class="bg-white p-6 rounded-lg shadow">
+                            <div class="text-gray-500 text-sm" data-i18n="merchantPage.dashboard.todayAmount">今日金额</div>
+                            <div class="text-3xl font-bold text-green-600">¥[[ (dashboard.today?.amount || 0).toFixed(2) ]]</div>
+                        </div>
+                        <div class="bg-white p-6 rounded-lg shadow">
+                            <div class="text-gray-500 text-sm" data-i18n="merchantPage.dashboard.totalOrders">累计订单</div>
+                            <div class="text-3xl font-bold text-purple-600">[[ dashboard.total?.orders || 0 ]]</div>
+                        </div>
+                        <div class="bg-white p-6 rounded-lg shadow">
+                            <div class="text-gray-500 text-sm" data-i18n="merchantPage.dashboard.totalAmount">累计金额</div>
+                            <div class="text-3xl font-bold text-orange-600">¥[[ (dashboard.total?.amount || 0).toFixed(2) ]]</div>
+                        </div>
+                    </div>
+
+                    <!-- 趋势图 -->
+                    <div class="bg-white p-6 rounded-lg shadow">
+                        <div class="flex justify-between items-center mb-4">
+                            <h3 class="text-lg font-semibold" data-i18n="dashboard.dataTrend">数据趋势</h3>
+                            <div class="flex gap-2">
+                                <button v-for="p in trendPeriods" :key="p.value"
+                                    @click="trendPeriod = p.value; loadTrendData()"
+                                    :class="trendPeriod === p.value ? 'bg-blue-500 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'"
+                                    class="px-3 py-1 rounded-lg text-sm transition-colors">
+                                    [[ p.label ]]
+                                </button>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <!-- 订单趋势 -->
+                            <div>
+                                <h4 class="text-sm font-medium text-gray-500 mb-3" data-i18n="dashboard.ordersTrend">订单数量趋势</h4>
+                                <div class="h-64 relative">
+                                    <canvas ref="ordersChart"></canvas>
+                                </div>
+                            </div>
+                            <!-- 金额趋势 -->
+                            <div>
+                                <h4 class="text-sm font-medium text-gray-500 mb-3" data-i18n="dashboard.amountTrend">交易金额趋势 (CNY)</h4>
+                                <div class="h-64 relative">
+                                    <canvas ref="amountChart"></canvas>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 订单管理 -->
+                <div v-if="currentTab === 'orders'" class="p-6">
+                    <div class="flex justify-between items-center mb-6">
+                        <h2 class="text-2xl font-bold" data-i18n="merchant.myOrders">订单管理</h2>
+                        <button @click="showTestPaymentModal = true" class="bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600">
+                            <i class="ri-add-line mr-1"></i><span data-i18n="adminPage.orders.testPayment">发起测试支付</span>
+                        </button>
+                    </div>
+                    <div class="bg-white p-4 rounded-lg shadow mb-6">
+                        <div class="grid grid-cols-1 md:grid-cols-5 gap-4">
+                            <input v-model="orderFilter.trade_no" data-i18n-placeholder="order.tradeNo" placeholder="交易号"
+                                class="px-3 py-2 border rounded-lg">
+                            <input v-model="orderFilter.out_trade_no" data-i18n-placeholder="order.outTradeNo" placeholder="商户订单号"
+                                class="px-3 py-2 border rounded-lg">
+                            <select v-model="orderFilter.status" class="px-3 py-2 border rounded-lg">
+                                <option value="" data-i18n="adminPage.orders.filter.allStatus">全部状态</option>
+                                <option value="0" data-i18n="order.statusPending">待支付</option>
+                                <option value="1" data-i18n="order.statusPaid">已支付</option>
+                                <option value="2" data-i18n="order.statusExpired">已过期</option>
+                            </select>
+                            <input v-model="orderFilter.start_date" type="date" class="px-3 py-2 border rounded-lg">
+                            <button @click="loadOrders" class="bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600" data-i18n="common.search">
+                                搜索
+                            </button>
+                        </div>
+                    </div>
+                    <div class="bg-white rounded-lg shadow overflow-hidden">
+                        <table class="min-w-full">
+                            <thead class="bg-gray-50">
+                                <tr>
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500" data-i18n="order.tradeNo">交易号</th>
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500" data-i18n="order.outTradeNo">商户订单号</th>
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500" data-i18n="adminPage.orders.tableHeader.paymentMethod">支付方式</th>
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500" data-i18n="order.amount">金额</th>
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500" data-i18n="adminPage.orders.tableHeader.received">实收</th>
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500" data-i18n="common.status">状态</th>
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500" data-i18n="order.createTime">创建时间</th>
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500" data-i18n="common.action">操作</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-gray-200">
+                                <tr v-for="order in orders" :key="order.id">
+                                    <td class="px-4 py-3 text-sm">[[ order.trade_no ]]</td>
+                                    <td class="px-4 py-3 text-sm">[[ order.out_trade_no ]]</td>
+                                    <td class="px-4 py-3 text-sm">
+                                        <span class="px-2 py-1 rounded text-xs" :class="getChainClass(order.type || order.chain)">
+                                            [[ getPaymentTypeName(order.type || order.chain) ]]
+                                        </span>
+                                    </td>
+                                    <td class="px-4 py-3 text-sm">¥[[ order.money ]]</td>
+                                    <td class="px-4 py-3 text-sm">[[ getReceivedAmount(order) ]]</td>
+                                    <td class="px-4 py-3">
+                                        <span class="px-2 py-1 rounded text-xs" :class="getStatusClass(order.status)">
+                                            [[ getStatusText(order.status) ]]
+                                        </span>
+                                    </td>
+                                    <td class="px-4 py-3 text-sm text-gray-500">[[ formatTime(order.created_at) ]]</td>
+                                    <td class="px-4 py-3 text-sm space-x-1">
+                                        <a v-if="order.status === 0"
+                                            :href="'/cashier/' + order.trade_no" target="_blank"
+                                            class="px-2 py-1 bg-blue-500 text-white rounded text-xs hover:bg-blue-600 inline-block"
+                                            data-i18n="merchantPage.orders.paymentPage">
+                                            支付页
+                                        </a>
+                                        <button v-if="order.status === 0 && (order.chain === 'wechat' || order.chain === 'alipay')"
+                                            @click="confirmPayment(order.trade_no)"
+                                            class="px-2 py-1 bg-green-500 text-white rounded text-xs hover:bg-green-600"
+                                            data-i18n="merchantPage.orders.confirmPayment">
+                                            确认收款
+                                        </button>
+                                        <button v-if="order.status === 0"
+                                            @click="cancelOrder(order.trade_no)"
+                                            class="px-2 py-1 bg-red-500 text-white rounded text-xs hover:bg-red-600"
+                                            data-i18n="common.cancel">
+                                            取消
+                                        </button>
+                                        <span v-if="order.status !== 0" class="text-gray-400">-</span>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="mt-4 flex justify-between items-center">
+                        <div class="text-gray-500 text-sm"><span data-i18n="common.total">共</span> [[ orderTotal ]] <span data-i18n="merchantPage.pagination.items">条</span></div>
+                        <div class="flex gap-2">
+                            <button @click="orderPage > 1 && (orderPage--, loadOrders())"
+                                :disabled="orderPage <= 1"
+                                class="px-3 py-1 border rounded disabled:opacity-50" data-i18n="common.previous">上一页</button>
+                            <span class="px-3 py-1">[[ orderPage ]]</span>
+                            <button @click="orderPage++; loadOrders()"
+                                :disabled="orders.length < 20"
+                                class="px-3 py-1 border rounded disabled:opacity-50" data-i18n="common.next">下一页</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 钱包管理 -->
+                <div v-if="currentTab === 'wallets'" class="p-6">
+                    <div class="flex justify-between items-center mb-4">
+                        <h2 class="text-2xl font-bold" data-i18n="merchantPage.wallets.title">钱包管理</h2>
+                        <button @click="showWalletModal = true; editWallet = {chain: 'trc20', status: 1}"
+                            class="bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600">
+                            <i class="ri-add-line mr-2"></i><span data-i18n="wallet.addWallet">添加钱包</span>
+                        </button>
+                    </div>
+                    <!-- 钱包说明 -->
+                    <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+                        <h3 class="font-bold text-blue-800 mb-2"><i class="ri-information-line mr-1"></i><span data-i18n="merchantPage.wallets.usageTitle">钱包使用说明</span></h3>
+                        <div class="text-sm text-blue-700 space-y-2">
+                            <div class="flex items-start">
+                                <span class="font-medium text-blue-800 mr-2">USDT:</span>
+                                <span data-i18n="merchantPage.wallets.usdtDesc">系统自动监控链上交易，添加钱包地址后即可收款。支持TRC20、ERC20、BSC等多链。</span>
+                            </div>
+                            <div class="flex items-start">
+                                <span class="font-medium text-orange-600 mr-2">WeChat/Alipay:</span>
+                                <span class="text-orange-700" data-i18n="merchantPage.wallets.wechatAlipayDesc">需要在手机上安装并运行 VMQ监控App，监控收款通知并自动推送到服务器完成订单匹配。</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                        <div v-for="wallet in wallets" :key="wallet.id"
+                            class="bg-white rounded-lg shadow p-6">
+                            <div class="flex justify-between items-start mb-4">
+                                <div>
+                                    <span class="px-2 py-1 rounded text-xs" :class="getChainClass(wallet.chain)">
+                                        [[ wallet.chain?.toUpperCase() ]]
+                                    </span>
+                                    <span v-if="!wallet.chain_enabled" class="ml-2 px-2 py-1 bg-red-100 text-red-600 rounded text-xs">
+                                        链路未启用
+                                    </span>
+                                </div>
+                                <span :class="wallet.status === 1 ? 'text-green-500' : 'text-gray-400'">
+                                    [[ wallet.status === 1 ? '启用' : '禁用' ]]
+                                </span>
+                            </div>
+                            <div class="text-gray-600 text-sm mb-2">[[ wallet.label || '未命名' ]]</div>
+                            <div class="text-gray-800 font-mono text-sm break-all mb-4">[[ wallet.address ]]</div>
+                            <div v-if="wallet.qrcode" class="mb-4">
+                                <img :src="wallet.qrcode" class="w-24 h-24 object-cover rounded">
+                            </div>
+                            <div class="flex gap-2">
+                                <button @click="editWalletFn(wallet)" class="text-blue-500 text-sm hover:underline">编辑</button>
+                                <button @click="deleteWallet(wallet.id)" class="text-red-500 text-sm hover:underline">删除</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 链路状态 -->
+                <div v-if="currentTab === 'chains'" class="p-6">
+                    <h2 class="text-2xl font-bold mb-6" data-i18n="merchantPage.chains.title">链路状态</h2>
+                    <p class="text-gray-500 mb-4" data-i18n="merchantPage.chains.desc">链路监控由管理员控制，您只能查看当前状态。禁用的链路将无法收款。</p>
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        <div v-for="chain in chains" :key="chain.chain"
+                            class="bg-white rounded-lg shadow p-4 flex justify-between items-center">
+                            <div>
+                                <div class="font-medium">[[ chain.name ]]</div>
+                                <div class="text-gray-500 text-sm">[[ chain.chain ]]</div>
+                            </div>
+                            <span :class="chain.enabled ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'"
+                                class="px-3 py-1 rounded-full text-sm">
+                                [[ chain.enabled ? $t('merchantPage.status.enabled') : $t('merchantPage.status.disabled') ]]
+                            </span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- API密钥 -->
+                <div v-if="currentTab === 'apikey'" class="p-6">
+                    <h2 class="text-2xl font-bold mb-6" data-i18n="merchantPage.apikey.title">API密钥</h2>
+                    <div class="bg-white rounded-lg shadow p-6 max-w-2xl">
+                        <div class="mb-6">
+                            <label class="block text-gray-700 text-sm font-bold mb-2" data-i18n="merchantPage.apikey.pid">商户PID</label>
+                            <div class="flex gap-2">
+                                <input :value="apiKey.pid" readonly class="flex-1 px-3 py-2 border rounded-lg bg-gray-50">
+                                <button @click="copyToClipboard(apiKey.pid)" class="px-4 py-2 border rounded-lg hover:bg-gray-50">
+                                    <i class="ri-file-copy-line"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="mb-6">
+                            <label class="block text-gray-700 text-sm font-bold mb-2" data-i18n="merchantPage.apikey.secretKey">商户密钥</label>
+                            <div class="flex gap-2">
+                                <input :value="showKey ? apiKey.key : '••••••••••••••••'" readonly
+                                    class="flex-1 px-3 py-2 border rounded-lg bg-gray-50 font-mono">
+                                <button @click="showKey = !showKey" class="px-4 py-2 border rounded-lg hover:bg-gray-50">
+                                    <i :class="showKey ? 'ri-eye-off-line' : 'ri-eye-line'"></i>
+                                </button>
+                                <button @click="copyToClipboard(apiKey.key)" class="px-4 py-2 border rounded-lg hover:bg-gray-50">
+                                    <i class="ri-file-copy-line"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <button @click="resetApiKey" class="bg-red-500 text-white px-4 py-2 rounded-lg hover:bg-red-600">
+                            <i class="ri-refresh-line mr-2"></i><span data-i18n="merchantPage.apikey.resetKey">重置密钥</span>
+                        </button>
+                        <p class="text-gray-500 text-sm mt-2" data-i18n="merchantPage.apikey.resetKeyWarning">重置密钥后，原密钥将立即失效</p>
+                    </div>
+                </div>
+
+                <!-- 提现管理 -->
+                <div v-if="currentTab === 'withdraw'" class="p-6">
+                    <h2 class="text-2xl font-bold mb-6" data-i18n="merchantPage.withdraw.title">提现管理</h2>
+
+                    <!-- 余额卡片 -->
+                    <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
+                        <div class="bg-white p-6 rounded-lg shadow">
+                            <div class="text-gray-500 text-sm" data-i18n="merchantPage.withdraw.balance">账户余额 (USDT)</div>
+                            <div class="text-3xl font-bold text-blue-600">[[ balance.balance?.toFixed(2) || '0.00' ]]</div>
+                        </div>
+                        <div class="bg-white p-6 rounded-lg shadow">
+                            <div class="text-gray-500 text-sm" data-i18n="merchantPage.withdraw.frozenBalance">冻结金额 (USDT)</div>
+                            <div class="text-3xl font-bold text-orange-600">[[ balance.frozen_balance?.toFixed(2) || '0.00' ]]</div>
+                        </div>
+                        <div class="bg-white p-6 rounded-lg shadow">
+                            <div class="text-gray-500 text-sm" data-i18n="merchantPage.withdraw.availableBalance">可提现金额 (USDT)</div>
+                            <div class="text-3xl font-bold text-green-600">[[ balance.available?.toFixed(2) || '0.00' ]]</div>
+                        </div>
+                        <div class="bg-gradient-to-br from-blue-500 to-purple-600 p-6 rounded-lg shadow text-white cursor-pointer hover:shadow-lg transition-shadow" @click="showRechargeModal = true">
+                            <div class="text-blue-100 text-sm" data-i18n="merchantPage.withdraw.recharge">余额充值</div>
+                            <div class="text-2xl font-bold mt-1"><i class="ri-add-circle-line mr-2"></i><span data-i18n="merchantPage.withdraw.recharge">充值</span></div>
+                            <div class="text-blue-200 text-xs mt-2" data-i18n="merchantPage.withdraw.rechargeDesc">充值手续费抵扣金额</div>
+                        </div>
+                    </div>
+
+                    <!-- 提现说明 -->
+                    <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-6">
+                        <div class="flex items-start">
+                            <i class="ri-information-line text-yellow-600 text-xl mr-2"></i>
+                            <div class="text-sm text-yellow-800">
+                                <p class="font-medium mb-1" data-i18n="merchantPage.withdraw.instructions">提现说明</p>
+                                <ul class="list-disc list-inside space-y-1">
+                                    <li><span data-i18n="merchantPage.withdraw.minWithdraw">最低提现金额</span>: <strong>50 USDT</strong></li>
+                                    <li><span data-i18n="merchantPage.withdraw.feePerTx">手续费</span>: <strong>1 USDT/<span data-i18n="merchantPage.withdraw.perTx">笔</span></strong> (<span data-i18n="merchantPage.withdraw.feeFixed">固定</span>)</li>
+                                    <li><span data-i18n="merchantPage.withdraw.supportedChains">支持链路</span>: TRC20、BEP20、Polygon、Optimism</li>
+                                    <li data-i18n="merchantPage.withdraw.addressNeedApproval">提现地址需先在设置中添加并通过审核</li>
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 申请提现 -->
+                    <div class="bg-white rounded-lg shadow p-6 mb-6">
+                        <h3 class="text-lg font-semibold mb-4" data-i18n="merchantPage.withdraw.applyWithdraw">申请提现</h3>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-gray-700 text-sm font-bold mb-2" data-i18n="merchantPage.withdraw.withdrawAmount">提现金额 (USDT)</label>
+                                <input v-model="withdrawForm.amount" type="number" step="1" min="50"
+                                    class="w-full px-3 py-2 border rounded-lg" data-i18n-placeholder="merchantPage.withdraw.minAmountHint" placeholder="最低50 USDT">
+                            </div>
+                            <div>
+                                <label class="block text-gray-700 text-sm font-bold mb-2" data-i18n="merchantPage.withdraw.withdrawAddress">提现地址</label>
+                                <select v-model="withdrawForm.address_id" class="w-full px-3 py-2 border rounded-lg">
+                                    <option value="" data-i18n="merchantPage.withdraw.selectAddress">请选择提现地址</option>
+                                    <option v-for="addr in approvedAddresses" :key="addr.id" :value="addr.id">
+                                        [[ getAddressChainName(addr.chain) ]] - [[ addr.label || addr.address.substring(0, 20) + '...' ]]
+                                    </option>
+                                </select>
+                                <p v-if="approvedAddresses.length === 0" class="text-red-500 text-xs mt-1" data-i18n="merchantPage.withdraw.noAddressHint">
+                                    暂无可用地址，请先在设置中添加提现地址
+                                </p>
+                            </div>
+                            <div class="md:col-span-2" v-if="selectedWithdrawAddress">
+                                <div class="bg-gray-50 p-3 rounded-lg">
+                                    <div class="text-sm text-gray-600">
+                                        <span class="font-medium" data-i18n="merchantPage.withdraw.fullAddress">完整地址:</span>
+                                        <span class="font-mono">[[ selectedWithdrawAddress.address ]]</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="md:col-span-2">
+                                <label class="block text-gray-700 text-sm font-bold mb-2" data-i18n="merchantPage.withdraw.remarkOptional">备注 (可选)</label>
+                                <input v-model="withdrawForm.remark" type="text"
+                                    class="w-full px-3 py-2 border rounded-lg" data-i18n-placeholder="merchantPage.withdraw.remarkPlaceholder" placeholder="备注信息">
+                            </div>
+                        </div>
+                        <div class="mt-4 flex items-center justify-between">
+                            <div class="text-sm text-gray-500" v-if="withdrawForm.amount >= 50">
+                                <span data-i18n="merchantPage.withdraw.actualReceive">实际到账</span>: <span class="font-bold text-green-600">[[ (withdrawForm.amount - 1).toFixed(2) ]] USDT</span>
+                                (<span data-i18n="merchantPage.withdraw.feeAmount">手续费</span> 1 USDT)
+                            </div>
+                            <button @click="submitWithdraw" :disabled="!canSubmitWithdraw"
+                                class="bg-blue-500 text-white px-6 py-2 rounded-lg hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed" data-i18n="merchantPage.withdraw.submitApply">
+                                提交申请
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- 提现记录 -->
+                    <div class="bg-white rounded-lg shadow overflow-hidden">
+                        <div class="p-4 border-b">
+                            <h3 class="text-lg font-semibold" data-i18n="merchantPage.withdraw.withdrawHistory">提现记录</h3>
+                        </div>
+                        <table class="min-w-full">
+                            <thead class="bg-gray-50">
+                                <tr>
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500" data-i18n="withdrawal.amount">提现金额</th>
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500" data-i18n="withdrawal.fee">手续费</th>
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500" data-i18n="withdrawal.actualAmount">实际到账</th>
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500" data-i18n="withdrawal.address">提现地址</th>
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500" data-i18n="common.status">状态</th>
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500" data-i18n="withdrawal.createTime">申请时间</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-gray-200">
+                                <tr v-for="w in withdrawals" :key="w.id">
+                                    <td class="px-4 py-3 text-sm">[[ w.amount ]] USDT</td>
+                                    <td class="px-4 py-3 text-sm text-gray-500">[[ w.fee ]] USDT</td>
+                                    <td class="px-4 py-3 text-sm font-medium">[[ w.real_amount ]] USDT</td>
+                                    <td class="px-4 py-3 text-sm">
+                                        <span class="px-2 py-1 rounded text-xs" :class="getChainClass(w.pay_method)">
+                                            [[ getAddressChainName(w.pay_method) ]]
+                                        </span>
+                                        <span class="text-gray-500 ml-1">[[ w.account?.substring(0, 10) ]]...</span>
+                                    </td>
+                                    <td class="px-4 py-3">
+                                        <span class="px-2 py-1 rounded text-xs" :class="getWithdrawStatusClass(w.status)">
+                                            [[ getWithdrawStatusText(w.status) ]]
+                                        </span>
+                                    </td>
+                                    <td class="px-4 py-3 text-sm text-gray-500">[[ formatTime(w.created_at) ]]</td>
+                                </tr>
+                                <tr v-if="withdrawals.length === 0">
+                                    <td colspan="6" class="px-4 py-8 text-center text-gray-500">暂无提现记录</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- 设置 -->
+                <div v-if="currentTab === 'settings'" class="p-6">
+                    <h2 class="text-2xl font-bold mb-6" data-i18n="merchantPage.settings.title">商户设置</h2>
+
+                    <!-- 流式布局：桌面端2列，移动端1列 -->
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <!-- 基本信息 -->
+                        <div class="bg-white rounded-lg shadow p-6">
+                            <h3 class="text-lg font-semibold mb-4" data-i18n="merchantPage.settings.basicInfo">基本信息</h3>
+                            <div class="space-y-4">
+                                <div>
+                                    <label class="block text-gray-700 text-sm font-bold mb-2" data-i18n="merchantPage.settings.merchantName">商户名称</label>
+                                    <input v-model="profile.name" class="w-full px-3 py-2 border rounded-lg">
+                                </div>
+                                <div>
+                                    <label class="block text-gray-700 text-sm font-bold mb-2" data-i18n="merchantPage.settings.contactEmail">联系邮箱</label>
+                                    <input v-model="profile.email" type="email" class="w-full px-3 py-2 border rounded-lg">
+                                </div>
+                                <div>
+                                    <label class="block text-gray-700 text-sm font-bold mb-2" data-i18n="merchantPage.settings.asyncNotifyUrl">异步通知URL</label>
+                                    <input v-model="profile.notify_url" class="w-full px-3 py-2 border rounded-lg" placeholder="https://example.com/notify">
+                                </div>
+                                <div>
+                                    <label class="block text-gray-700 text-sm font-bold mb-2" data-i18n="merchantPage.settings.syncReturnUrl">同步跳转URL</label>
+                                    <input v-model="profile.return_url" class="w-full px-3 py-2 border rounded-lg" placeholder="https://example.com/return">
+                                </div>
+                                <button @click="updateProfile" class="bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600" data-i18n="merchantPage.settings.saveChanges">
+                                    保存修改
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- 修改密码 -->
+                        <div class="bg-white rounded-lg shadow p-6">
+                            <h3 class="text-lg font-semibold mb-4" data-i18n="merchantPage.settings.changePassword">修改密码</h3>
+                            <div class="space-y-4">
+                                <div>
+                                    <label class="block text-gray-700 text-sm font-bold mb-2" data-i18n="merchantPage.settings.currentPassword">当前密码</label>
+                                    <input v-model="passwordForm.old_password" type="password" class="w-full px-3 py-2 border rounded-lg">
+                                </div>
+                                <div>
+                                    <label class="block text-gray-700 text-sm font-bold mb-2" data-i18n="merchantPage.settings.newPassword">新密码</label>
+                                    <input v-model="passwordForm.new_password" type="password" class="w-full px-3 py-2 border rounded-lg">
+                                </div>
+                                <button @click="changePassword" class="bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600" data-i18n="merchantPage.settings.changePassword">
+                                    修改密码
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- 钱包模式设置 -->
+                        <div class="bg-white rounded-lg shadow p-6">
+                            <h3 class="text-lg font-semibold mb-4" data-i18n="merchantPage.settings.walletMode">钱包模式</h3>
+                            <p class="text-gray-500 text-sm mb-4" data-i18n="merchantPage.settings.walletModeDesc">选择收款时使用的钱包类型</p>
+                            <div class="space-y-3">
+                                <label class="flex items-center p-3 border rounded-lg cursor-pointer hover:bg-gray-50"
+                                    :class="{'border-blue-500 bg-blue-50': walletMode === 1}">
+                                    <input type="radio" v-model="walletMode" :value="1" class="mr-3">
+                                    <div class="flex-1">
+                                        <div class="font-medium" data-i18n="merchantPage.settings.systemWalletOnly">仅系统钱包</div>
+                                        <div class="text-gray-500 text-sm" data-i18n="merchantPage.settings.systemWalletDesc">只使用管理员配置的系统钱包收款</div>
+                                    </div>
+                                    <div class="text-right">
+                                        <span class="text-orange-500 font-medium">[[ (parseFloat(feeRates.system) * 100).toFixed(1) ]]%</span>
+                                        <div class="text-xs text-gray-400" data-i18n="merchantPage.settings.feeRate">手续费率</div>
+                                    </div>
+                                </label>
+                                <label class="flex items-center p-3 border rounded-lg cursor-pointer hover:bg-gray-50"
+                                    :class="{'border-blue-500 bg-blue-50': walletMode === 2}">
+                                    <input type="radio" v-model="walletMode" :value="2" class="mr-3">
+                                    <div class="flex-1">
+                                        <div class="font-medium" data-i18n="merchantPage.settings.personalWalletOnly">仅个人钱包</div>
+                                        <div class="text-gray-500 text-sm" data-i18n="merchantPage.settings.personalWalletDesc">只使用您自己添加的钱包收款</div>
+                                    </div>
+                                    <div class="text-right">
+                                        <span class="text-green-500 font-medium">[[ (parseFloat(feeRates.personal) * 100).toFixed(1) ]]%</span>
+                                        <div class="text-xs text-gray-400" data-i18n="merchantPage.settings.feeRate">手续费率</div>
+                                    </div>
+                                </label>
+                                <label class="flex items-center p-3 border rounded-lg cursor-pointer hover:bg-gray-50"
+                                    :class="{'border-blue-500 bg-blue-50': walletMode === 3}">
+                                    <input type="radio" v-model="walletMode" :value="3" class="mr-3">
+                                    <div class="flex-1">
+                                        <div class="font-medium" data-i18n="merchantPage.settings.bothWallets">两者同时使用 (推荐)</div>
+                                        <div class="text-gray-500 text-sm" data-i18n="merchantPage.settings.bothWalletsDesc">优先使用个人钱包，无可用时自动使用系统钱包</div>
+                                    </div>
+                                    <div class="text-right">
+                                        <span class="text-blue-500 font-medium" data-i18n="merchantPage.settings.separateBilling">分别计费</span>
+                                        <div class="text-xs text-gray-400" data-i18n="merchantPage.settings.byActualUsage">按实际使用</div>
+                                    </div>
+                                </label>
+                            </div>
+                            <!-- 手续费说明 -->
+                            <div class="mt-4 p-3 bg-gray-50 rounded-lg text-sm text-gray-600">
+                                <div class="font-medium mb-2" data-i18n="merchantPage.settings.feeExplanation">手续费说明：</div>
+                                <ul class="space-y-1 list-disc list-inside">
+                                    <li><span class="text-orange-500">系统钱包</span> ([[ (parseFloat(feeRates.system) * 100).toFixed(1) ]]%)：收款扣除手续费后入账到您的余额</li>
+                                    <li><span class="text-green-500">个人钱包</span> ([[ (parseFloat(feeRates.personal) * 100).toFixed(1) ]]%)：收款直接到您的账户，手续费从余额扣除</li>
+                                    <li><span class="text-blue-500">混合模式</span>：根据实际使用的钱包类型分别计费</li>
+                                </ul>
+                            </div>
+                            <button @click="saveWalletMode" class="mt-4 bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600" data-i18n="merchantPage.settings.saveWalletMode">
+                                保存钱包模式
+                            </button>
+                        </div>
+
+                        <!-- Telegram绑定 -->
+                        <div class="bg-white rounded-lg shadow p-6">
+                            <h3 class="text-lg font-semibold mb-4" data-i18n="merchantPage.settings.telegramNotify">Telegram通知</h3>
+                            <div v-if="profile.telegram_chat_id">
+                                <div class="flex items-center text-green-600 mb-2">
+                                    <i class="ri-checkbox-circle-fill mr-2"></i>
+                                    <span>已绑定Telegram</span>
+                                </div>
+                                <p class="text-gray-500 text-sm">Chat ID: [[ profile.telegram_chat_id ]]</p>
+                                <p class="text-gray-500 text-sm mt-2">您将通过Telegram接收订单通知、提现通知等消息。</p>
+                            </div>
+                            <div v-else-if="!telegramBot.enabled">
+                                <div class="flex items-center text-orange-500 mb-2">
+                                    <i class="ri-error-warning-line mr-2"></i>
+                                    <span>Telegram通知未启用</span>
+                                </div>
+                                <p class="text-gray-500 text-sm">管理员尚未配置Telegram机器人，暂时无法使用此功能。</p>
+                            </div>
+                            <div v-else>
+                                <div class="flex items-center text-gray-500 mb-2">
+                                    <i class="ri-close-circle-line mr-2"></i>
+                                    <span>未绑定Telegram</span>
+                                </div>
+                                <p class="text-gray-500 text-sm mb-4">绑定后可接收订单、提现等实时通知。</p>
+                                <div class="bg-blue-50 p-4 rounded-lg">
+                                    <p class="text-sm text-blue-800 mb-2">绑定方法:</p>
+                                    <ol class="text-sm text-blue-700 list-decimal list-inside space-y-1">
+                                        <li>在Telegram中搜索 <a :href="'https://t.me/' + telegramBot.username.replace('@', '')" target="_blank" class="text-blue-600 font-medium hover:underline">[[ telegramBot.username ]]</a></li>
+                                        <li>点击 <strong>开始</strong> 或发送 <code class="bg-blue-100 px-1 rounded">/start</code></li>
+                                        <li>发送绑定命令: <code class="bg-blue-100 px-1 rounded">/bind &lt;商户PID&gt; &lt;商户密钥&gt;</code></li>
+                                        <li>按提示完成绑定</li>
+                                    </ol>
+                                    <p class="text-xs text-blue-600 mt-2">
+                                        <i class="ri-information-line"></i>
+                                        商户PID和密钥请到 <a @click="currentTab = 'apikey'" class="underline cursor-pointer">API密钥</a> 页面查看
+                                    </p>
+                                </div>
+                            </div>
+
+                            <!-- 通知设置 -->
+                            <div v-if="profile.telegram_chat_id" class="mt-4 pt-4 border-t">
+                                <h4 class="font-medium text-gray-700 mb-3">通知设置</h4>
+                                <div class="space-y-2">
+                                    <label class="flex items-center">
+                                        <input type="checkbox" v-model="notifySettings.order_created" class="mr-2 rounded">
+                                        <span class="text-sm text-gray-600">订单创建通知</span>
+                                    </label>
+                                    <label class="flex items-center">
+                                        <input type="checkbox" v-model="notifySettings.order_paid" class="mr-2 rounded">
+                                        <span class="text-sm text-gray-600">订单支付成功通知</span>
+                                    </label>
+                                    <label class="flex items-center">
+                                        <input type="checkbox" v-model="notifySettings.order_expired" class="mr-2 rounded">
+                                        <span class="text-sm text-gray-600">订单过期通知</span>
+                                    </label>
+                                    <label class="flex items-center">
+                                        <input type="checkbox" v-model="notifySettings.withdraw_created" class="mr-2 rounded">
+                                        <span class="text-sm text-gray-600">发起提现通知</span>
+                                    </label>
+                                    <label class="flex items-center">
+                                        <input type="checkbox" v-model="notifySettings.withdraw_success" class="mr-2 rounded">
+                                        <span class="text-sm text-gray-600">提现成功通知</span>
+                                    </label>
+                                    <label class="flex items-center">
+                                        <input type="checkbox" v-model="notifySettings.withdraw_reject" class="mr-2 rounded">
+                                        <span class="text-sm text-gray-600">提现拒绝通知</span>
+                                    </label>
+                                    <label class="flex items-center">
+                                        <input type="checkbox" v-model="notifySettings.config_changed" class="mr-2 rounded">
+                                        <span class="text-sm text-gray-600">配置变更通知</span>
+                                    </label>
+                                    <label class="flex items-center">
+                                        <input type="checkbox" v-model="notifySettings.security_alert" class="mr-2 rounded">
+                                        <span class="text-sm text-gray-600">安全警告通知</span>
+                                    </label>
+                                </div>
+                                <button @click="saveNotifySettings" class="mt-4 bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600 text-sm">
+                                    保存通知设置
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- 监控客户端配置 -->
+                        <div class="bg-white rounded-lg shadow p-6">
+                            <h3 class="text-lg font-semibold mb-4">
+                                <i class="ri-qr-code-line mr-2"></i>监控客户端配置
+                            </h3>
+                            <p class="text-gray-500 text-sm mb-4">扫描二维码配置EzPay APP</p>
+
+                            <div v-if="monitorLoading" class="text-center py-8">
+                                <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+                                <p class="text-gray-500 mt-2">加载中...</p>
+                            </div>
+
+                            <div v-else-if="monitorConfig.qrcode" class="space-y-4">
+                                <!-- 二维码 -->
+                                <div class="flex justify-center">
+                                    <div class="p-4 bg-white border-2 border-gray-200 rounded-lg">
+                                        <img :src="monitorConfig.qrcode" alt="配置二维码" class="w-48 h-48">
+                                    </div>
+                                </div>
+
+                                <!-- 配置信息 -->
+                                <div class="bg-gray-50 p-4 rounded-lg">
+                                    <div class="space-y-2 text-sm">
+                                        <div class="flex justify-between items-center">
+                                            <span class="text-gray-500">服务器地址:</span>
+                                            <span class="font-mono text-gray-800">[[ monitorConfig.server_url ]]</span>
+                                        </div>
+                                        <div class="flex justify-between items-center">
+                                            <span class="text-gray-500">商户PID:</span>
+                                            <span class="font-mono text-gray-800">[[ monitorConfig.pid ]]</span>
+                                        </div>
+                                        <div class="flex justify-between items-center">
+                                            <span class="text-gray-500">通讯密钥:</span>
+                                            <span class="font-mono text-gray-800">[[ monitorConfig.key?.substring(0, 8) ]]****</span>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- APP下载 -->
+                                <div v-if="monitorConfig.app && monitorConfig.app.has_app" class="bg-green-50 p-4 rounded-lg">
+                                    <div class="flex items-center justify-between mb-2">
+                                        <span class="text-sm font-medium text-green-800">
+                                            <i class="ri-android-fill mr-1"></i>监控APP
+                                        </span>
+                                        <span class="text-xs text-green-600">v[[ monitorConfig.app.version_name ]]</span>
+                                    </div>
+                                    <p class="text-xs text-green-700 mb-3">[[ monitorConfig.app.changelog || '监控微信/支付宝收款并自动推送到服务器' ]]</p>
+                                    <a :href="monitorConfig.app.download_url" target="_blank"
+                                        class="block w-full bg-green-500 text-white text-center py-2 rounded-lg hover:bg-green-600 text-sm">
+                                        <i class="ri-download-line mr-1"></i>下载APP ([[ (monitorConfig.app.file_size / 1024 / 1024).toFixed(1) ]] MB)
+                                    </a>
+                                </div>
+
+                                <!-- 使用说明 -->
+                                <div class="bg-blue-50 p-4 rounded-lg">
+                                    <p class="text-sm text-blue-800 font-medium mb-2">使用说明:</p>
+                                    <ol class="text-sm text-blue-700 list-decimal list-inside space-y-1">
+                                        <li v-for="(tip, index) in monitorConfig.tips" :key="index">[[ tip.replace(/^\d+\.\s*/, '') ]]</li>
+                                    </ol>
+                                </div>
+
+                                <!-- 刷新按钮 -->
+                                <button @click="loadMonitorConfig" class="w-full bg-gray-100 text-gray-600 px-4 py-2 rounded-lg hover:bg-gray-200 text-sm">
+                                    <i class="ri-refresh-line mr-1"></i>刷新二维码
+                                </button>
+                            </div>
+
+                            <div v-else class="text-center py-8 text-gray-500">
+                                <i class="ri-error-warning-line text-2xl mb-2"></i>
+                                <p>无法加载配置信息</p>
+                                <button @click="loadMonitorConfig" class="mt-2 text-blue-500 hover:underline text-sm">重试</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 提现地址管理 (独占一行) -->
+                    <div class="bg-white rounded-lg shadow p-6 mt-6">
+                        <div class="flex justify-between items-center mb-4">
+                            <h3 class="text-lg font-semibold">提现地址管理</h3>
+                            <button @click="showAddressModal = true; editAddress = {chain: 'trc20'}"
+                                class="bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600 text-sm">
+                                <i class="ri-add-line mr-1"></i>添加地址
+                            </button>
+                        </div>
+                        <p class="text-gray-500 text-sm mb-4">提现地址需要管理员审核后才能使用，支持 TRC20、BEP20、Polygon、Optimism</p>
+
+                        <div v-if="withdrawAddresses.length === 0" class="text-center py-8 text-gray-500">
+                            暂无提现地址，请点击上方按钮添加
+                        </div>
+                        <div v-else class="space-y-3">
+                            <div v-for="addr in withdrawAddresses" :key="addr.id"
+                                class="border rounded-lg p-4 flex items-center justify-between"
+                                :class="{'border-green-300 bg-green-50': addr.status === 1, 'border-yellow-300 bg-yellow-50': addr.status === 0, 'border-red-300 bg-red-50': addr.status === 2}">
+                                <div class="flex-1">
+                                    <div class="flex items-center gap-2 mb-1">
+                                        <span class="px-2 py-1 rounded text-xs" :class="getChainClass(addr.chain)">
+                                            [[ getAddressChainName(addr.chain) ]]
+                                        </span>
+                                        <span v-if="addr.is_default" class="px-2 py-1 bg-blue-100 text-blue-600 rounded text-xs">默认</span>
+                                        <span class="px-2 py-1 rounded text-xs" :class="getAddressStatusClass(addr.status)">
+                                            [[ getAddressStatusText(addr.status) ]]
+                                        </span>
+                                    </div>
+                                    <div class="text-gray-600 text-sm">[[ addr.label || '未命名' ]]</div>
+                                    <div class="text-gray-800 font-mono text-sm break-all">[[ addr.address ]]</div>
+                                    <div v-if="addr.admin_remark && addr.status === 2" class="text-red-500 text-xs mt-1">
+                                        拒绝原因: [[ addr.admin_remark ]]
+                                    </div>
+                                </div>
+                                <div class="flex gap-2 ml-4">
+                                    <button v-if="addr.status === 1 && !addr.is_default" @click="setDefaultAddress(addr.id)"
+                                        class="text-blue-500 text-sm hover:underline">设为默认</button>
+                                    <button @click="deleteWithdrawAddress(addr.id)" class="text-red-500 text-sm hover:underline">删除</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 钱包编辑弹窗 -->
+        <div v-if="showWalletModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div class="bg-white rounded-lg p-6 w-full max-w-md">
+                <h3 class="text-lg font-bold mb-4">[[ editWallet.id ? '编辑钱包' : '添加钱包' ]]</h3>
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-gray-700 text-sm font-bold mb-2">链类型</label>
+                        <select v-model="editWallet.chain" :disabled="editWallet.id" class="w-full px-3 py-2 border rounded-lg">
+                            <option value="trx">TRX (Tron原生)</option>
+                            <option value="trc20">TRC20 (Tron USDT)</option>
+                            <option value="erc20">ERC20 (Ethereum)</option>
+                            <option value="bep20">BEP20 (BSC)</option>
+                            <option value="polygon">Polygon</option>
+                            <option value="optimism">Optimism</option>
+                            <option value="arbitrum">Arbitrum</option>
+                            <option value="avalanche">Avalanche</option>
+                            <option value="base">Base</option>
+                            <option value="wechat">微信支付</option>
+                            <option value="alipay">支付宝</option>
+                        </select>
+                    </div>
+                    <div v-if="editWallet.chain !== 'wechat' && editWallet.chain !== 'alipay'">
+                        <label class="block text-gray-700 text-sm font-bold mb-2">钱包地址</label>
+                        <input v-model="editWallet.address" :disabled="editWallet.id"
+                            class="w-full px-3 py-2 border rounded-lg" placeholder="USDT钱包地址">
+                    </div>
+                    <div>
+                        <label class="block text-gray-700 text-sm font-bold mb-2">标签</label>
+                        <input v-model="editWallet.label" class="w-full px-3 py-2 border rounded-lg" placeholder="备注名称">
+                    </div>
+                    <div v-if="editWallet.chain === 'wechat' || editWallet.chain === 'alipay'">
+                        <label class="block text-gray-700 text-sm font-bold mb-2">收款码 (必填)</label>
+                        <input type="file" @change="uploadQRCode" accept="image/*" class="w-full">
+                        <img v-if="editWallet.qrcode" :src="editWallet.qrcode" class="mt-2 w-32 h-32 object-cover rounded">
+                        <p class="text-gray-500 text-sm mt-1">微信/支付宝必须上传收款码图片</p>
+                    </div>
+                    <div>
+                        <label class="block text-gray-700 text-sm font-bold mb-2">状态</label>
+                        <select v-model="editWallet.status" class="w-full px-3 py-2 border rounded-lg">
+                            <option :value="1">启用</option>
+                            <option :value="0">禁用</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="flex justify-end gap-2 mt-6">
+                    <button @click="showWalletModal = false" class="px-4 py-2 border rounded-lg hover:bg-gray-50">取消</button>
+                    <button @click="saveWallet" class="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600">保存</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 提现地址编辑弹窗 -->
+        <div v-if="showAddressModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div class="bg-white rounded-lg p-6 w-full max-w-md">
+                <h3 class="text-lg font-bold mb-4">添加提现地址</h3>
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-gray-700 text-sm font-bold mb-2">链类型</label>
+                        <select v-model="editAddress.chain" class="w-full px-3 py-2 border rounded-lg">
+                            <option value="trc20">TRC20 (Tron USDT)</option>
+                            <option value="bep20">BEP20 (BSC USDT)</option>
+                            <option value="polygon">Polygon USDT</option>
+                            <option value="optimism">Optimism USDT</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-gray-700 text-sm font-bold mb-2">钱包地址</label>
+                        <input v-model="editAddress.address"
+                            class="w-full px-3 py-2 border rounded-lg"
+                            placeholder="请输入USDT钱包地址">
+                    </div>
+                    <div>
+                        <label class="block text-gray-700 text-sm font-bold mb-2">备注名称</label>
+                        <input v-model="editAddress.label" class="w-full px-3 py-2 border rounded-lg" placeholder="如：主钱包、备用钱包">
+                    </div>
+                </div>
+                <div class="bg-yellow-50 p-3 rounded-lg mt-4 text-sm text-yellow-700">
+                    <i class="ri-information-line mr-1"></i>
+                    提现地址添加后需要管理员审核，审核通过后才能使用。
+                </div>
+                <div class="flex justify-end gap-2 mt-6">
+                    <button @click="showAddressModal = false" class="px-4 py-2 border rounded-lg hover:bg-gray-50">取消</button>
+                    <button @click="saveWithdrawAddress" class="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600">提交审核</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 充值弹窗 -->
+        <div v-if="showRechargeModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div class="bg-white rounded-lg p-6 w-full max-w-lg">
+                <h3 class="text-lg font-bold mb-4">余额充值</h3>
+
+                <!-- 充值说明 -->
+                <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-4">
+                    <div class="flex items-start">
+                        <i class="ri-customer-service-2-line text-yellow-600 text-xl mr-2"></i>
+                        <div class="text-sm text-yellow-800">
+                            <p class="font-medium mb-1">充值说明</p>
+                            <ul class="list-disc list-inside space-y-1">
+                                <li>请先联系客服确认充值金额和方式</li>
+                                <li>向以下地址转账后，由客服手动添加到余额</li>
+                                <li>充值金额用于抵扣<strong>个人钱包</strong>收款的手续费</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 客服链接 -->
+                <div v-if="serviceLinks.telegram || serviceLinks.discord" class="flex gap-3 mb-4">
+                    <a v-if="serviceLinks.telegram" :href="serviceLinks.telegram" target="_blank"
+                        class="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors">
+                        <i class="ri-telegram-fill text-xl"></i>
+                        <span>Telegram 客服</span>
+                    </a>
+                    <a v-if="serviceLinks.discord" :href="serviceLinks.discord" target="_blank"
+                        class="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 transition-colors">
+                        <i class="ri-discord-fill text-xl"></i>
+                        <span>Discord 客服</span>
+                    </a>
+                </div>
+
+                <!-- 充值地址列表 -->
+                <div v-if="rechargeAddresses.length > 0" class="space-y-3">
+                    <div v-for="addr in rechargeAddresses" :key="addr.chain"
+                        class="border rounded-lg p-4 hover:bg-gray-50">
+                        <div class="flex justify-between items-center mb-2">
+                            <span class="px-2 py-1 rounded text-xs" :class="getChainClass(addr.chain)">
+                                [[ addr.name ]]
+                            </span>
+                            <button @click="copyToClipboard(addr.address)"
+                                class="text-blue-500 text-sm hover:underline">
+                                <i class="ri-file-copy-line mr-1"></i>复制
+                            </button>
+                        </div>
+                        <!-- USDT 显示地址 -->
+                        <div class="text-gray-800 font-mono text-sm break-all">[[ addr.address ]]</div>
+                    </div>
+                </div>
+                <div v-else class="text-center py-8 text-gray-500">
+                    <i class="ri-inbox-line text-4xl mb-2"></i>
+                    <p>暂无可用充值地址</p>
+                    <p class="text-sm">请联系管理员配置系统钱包</p>
+                </div>
+
+                <div class="flex justify-end gap-2 mt-6">
+                    <button @click="showRechargeModal = false" class="px-4 py-2 border rounded-lg hover:bg-gray-50">关闭</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 测试支付模态框 -->
+        <div v-if="showTestPaymentModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div class="bg-white rounded-lg shadow-xl w-full max-w-md p-6">
+                <h3 class="text-xl font-bold mb-4">发起测试支付</h3>
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">支付方式</label>
+                        <select v-model="testPayment.type" class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <option value="usdt_trc20">USDT-TRC20</option>
+                            <option value="usdt_erc20">USDT-ERC20</option>
+                            <option value="usdt_bep20">USDT-BEP20</option>
+                            <option value="usdt_polygon">USDT-Polygon</option>
+                            <option value="usdt_optimism">USDT-Optimism</option>
+                            <option value="usdt_arbitrum">USDT-Arbitrum</option>
+                            <option value="usdt_base">USDT-Base</option>
+                            <option value="usdt_avalanche">USDT-Avalanche</option>
+                            <option value="trx">TRX</option>
+                            <option value="wechat">微信</option>
+                            <option value="alipay">支付宝</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">金额(CNY)</label>
+                        <input v-model="testPayment.money" type="number" step="0.01" min="0.01"
+                            class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            placeholder="10">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">商品名称(可选)</label>
+                        <input v-model="testPayment.name" type="text"
+                            class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            placeholder="测试订单">
+                    </div>
+                </div>
+                <div class="flex justify-end gap-2 mt-6">
+                    <button @click="showTestPaymentModal = false" class="px-4 py-2 border rounded-lg hover:bg-gray-50">取消</button>
+                    <button @click="createTestOrder" class="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600">创建并跳转支付</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 提示消息 -->
+        <div v-if="toast.show" class="fixed top-4 right-4 px-4 py-2 rounded-lg shadow-lg z-50"
+            :class="toast.type === 'success' ? 'bg-green-500 text-white' : 'bg-red-500 text-white'">
+            [[ toast.message ]]
+        </div>
+    </div>
+
+    <script>
+    const { createApp, ref, reactive, computed, onMounted, watch } = Vue;
+
+    const app = createApp({
+        setup() {
+            const isLoggedIn = ref(false);
+            const loading = ref(false);
+            const loginError = ref('');
+            const currentTab = ref('dashboard');
+            const token = ref('');
+            const merchant = ref({});
+
+            const loginForm = reactive({ pid: '', password: '' });
+            const dashboard = ref({});
+            const trendData = ref({ labels: [], orders: [], amounts: [] });
+            const trendPeriod = ref('week');
+            const trendPeriods = [
+                { label: '当日', value: 'today' },
+                { label: '1周', value: 'week' },
+                { label: '1个月', value: 'month' },
+                { label: '3个月', value: '3months' }
+            ];
+            const ordersChart = ref(null);
+            const amountChart = ref(null);
+            let ordersChartInstance = null;
+            let amountChartInstance = null;
+            const orders = ref([]);
+            const orderTotal = ref(0);
+            const orderPage = ref(1);
+            const orderFilter = reactive({ trade_no: '', out_trade_no: '', status: '', start_date: '' });
+            const wallets = ref([]);
+            const chains = ref([]);
+            const apiKey = ref({ pid: '', key: '' });
+            const showKey = ref(false);
+            const profile = reactive({ name: '', email: '', notify_url: '', return_url: '', telegram_chat_id: 0 });
+            const passwordForm = reactive({ old_password: '', new_password: '' });
+            const showWalletModal = ref(false);
+            const editWallet = ref({});
+            const toast = reactive({ show: false, message: '', type: 'success' });
+            const balance = ref({});
+            const withdrawals = ref([]);
+            const withdrawForm = reactive({ amount: '', address_id: '', remark: '' });
+            const walletMode = ref(3);
+            const feeRates = reactive({ system: '0.02', personal: '0.01' });
+            const withdrawAddresses = ref([]);
+            const showAddressModal = ref(false);
+            const editAddress = ref({ chain: 'trc20' });
+            const telegramBot = reactive({ enabled: false, username: '' });
+            const notifySettings = reactive({
+                order_created: true,
+                order_paid: true,
+                order_expired: false,
+                withdraw_created: true,
+                withdraw_success: true,
+                withdraw_reject: true,
+                config_changed: true,
+                security_alert: true
+            });
+            const showRechargeModal = ref(false);
+            const rechargeAddresses = ref([]);
+            const serviceLinks = reactive({ telegram: '', discord: '' });
+            const monitorConfig = reactive({ server_url: '', key: '', pid: '', qrcode: '', tips: [] });
+            const monitorLoading = ref(false);
+
+            // 测试支付相关
+            const showTestPaymentModal = ref(false);
+            const testPayment = reactive({ type: 'usdt_trc20', money: '10', name: '' });
+
+            // 计算属性：已审核通过的地址
+            const approvedAddresses = computed(() => {
+                return withdrawAddresses.value.filter(a => a.status === 1);
+            });
+
+            // 计算属性：选中的提现地址
+            const selectedWithdrawAddress = computed(() => {
+                if (!withdrawForm.address_id) return null;
+                return withdrawAddresses.value.find(a => a.id === withdrawForm.address_id);
+            });
+
+            // 计算属性：是否可以提交提现
+            const canSubmitWithdraw = computed(() => {
+                return withdrawForm.amount >= 50 && withdrawForm.address_id;
+            });
+
+            const api = axios.create({ baseURL: '/merchant/api' });
+            api.interceptors.request.use(config => {
+                if (token.value) config.headers.Authorization = `Bearer ${token.value}`;
+                return config;
+            });
+            api.interceptors.response.use(
+                res => res,
+                err => {
+                    if (err.response?.status === 401) {
+                        logout();
+                    }
+                    return Promise.reject(err);
+                }
+            );
+
+            const showToast = (message, type = 'success') => {
+                toast.message = message;
+                toast.type = type;
+                toast.show = true;
+                setTimeout(() => toast.show = false, 3000);
+            };
+
+            const login = async () => {
+                loading.value = true;
+                loginError.value = '';
+                try {
+                    const res = await axios.post('/merchant/api/login', loginForm);
+                    if (res.data.code === 1) {
+                        token.value = res.data.data.token;
+                        merchant.value = res.data.data.merchant;
+                        localStorage.setItem('merchant_token', token.value);
+                        localStorage.setItem('merchant_info', JSON.stringify(merchant.value));
+                        isLoggedIn.value = true;
+                        loadDashboard();
+                    } else {
+                        loginError.value = res.data.msg;
+                    }
+                } catch (e) {
+                    loginError.value = '登录失败，请重试';
+                }
+                loading.value = false;
+            };
+
+            const logout = () => {
+                token.value = '';
+                merchant.value = {};
+                isLoggedIn.value = false;
+                localStorage.removeItem('merchant_token');
+                localStorage.removeItem('merchant_info');
+            };
+
+            const loadDashboard = async () => {
+                try {
+                    const res = await api.get('/dashboard');
+                    if (res.data.code === 1) dashboard.value = res.data.data;
+                    // 加载趋势数据
+                    loadTrendData();
+                } catch (e) {}
+            };
+
+            const loadTrendData = async () => {
+                try {
+                    const res = await api.get('/dashboard/trend', { params: { period: trendPeriod.value } });
+                    if (res.data.code === 1) {
+                        trendData.value = res.data.data;
+                        // 延迟渲染图表，确保DOM已更新
+                        setTimeout(() => renderCharts(), 100);
+                    }
+                } catch (e) {}
+            };
+
+            const renderCharts = () => {
+                // 销毁旧图表
+                if (ordersChartInstance) {
+                    ordersChartInstance.destroy();
+                    ordersChartInstance = null;
+                }
+                if (amountChartInstance) {
+                    amountChartInstance.destroy();
+                    amountChartInstance = null;
+                }
+
+                const data = trendData.value;
+                if (!data.labels || data.labels.length === 0) return;
+
+                // 订单趋势图
+                if (ordersChart.value) {
+                    const ctx1 = ordersChart.value.getContext('2d');
+                    ordersChartInstance = new Chart(ctx1, {
+                        type: 'line',
+                        data: {
+                            labels: data.labels,
+                            datasets: [{
+                                label: '订单数',
+                                data: data.orders,
+                                borderColor: '#3b82f6',
+                                backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                                fill: true,
+                                tension: 0.4
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            plugins: { legend: { display: false } },
+                            scales: {
+                                y: { beginAtZero: true, ticks: { stepSize: 1 } }
+                            }
+                        }
+                    });
+                }
+
+                // 金额趋势图
+                if (amountChart.value) {
+                    const ctx2 = amountChart.value.getContext('2d');
+                    amountChartInstance = new Chart(ctx2, {
+                        type: 'bar',
+                        data: {
+                            labels: data.labels,
+                            datasets: [{
+                                label: '金额(CNY)',
+                                data: data.amounts,
+                                backgroundColor: 'rgba(16, 185, 129, 0.7)',
+                                borderColor: '#10b981',
+                                borderWidth: 1
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            plugins: { legend: { display: false } },
+                            scales: {
+                                y: { beginAtZero: true }
+                            }
+                        }
+                    });
+                }
+            };
+
+            const loadOrders = async () => {
+                try {
+                    const params = { page: orderPage.value, page_size: 20, ...orderFilter };
+                    const res = await api.get('/orders', { params });
+                    if (res.data.code === 1) {
+                        orders.value = res.data.data.list || [];
+                        orderTotal.value = res.data.data.total;
+                    }
+                } catch (e) {}
+            };
+
+            const confirmPayment = async (tradeNo) => {
+                if (!confirm('确认已收到该订单的付款？确认后将触发回调通知。')) return;
+                try {
+                    const res = await api.post(`/orders/${tradeNo}/confirm`);
+                    if (res.data.code === 1) {
+                        alert('确认成功，已触发回调通知');
+                        loadOrders();
+                    } else {
+                        alert(res.data.msg || '确认失败');
+                    }
+                } catch (e) {
+                    alert('请求失败');
+                }
+            };
+
+            const createTestOrder = async () => {
+                if (!testPayment.money || parseFloat(testPayment.money) <= 0) {
+                    alert('请输入有效金额');
+                    return;
+                }
+                try {
+                    const res = await api.post('/orders/test', {
+                        type: testPayment.type,
+                        money: testPayment.money,
+                        name: testPayment.name || '测试订单'
+                    });
+                    if (res.data.code === 1) {
+                        showTestPaymentModal.value = false;
+                        window.open(res.data.pay_url, '_blank');
+                        loadOrders();
+                    } else {
+                        alert(res.data.msg || '创建失败');
+                    }
+                } catch (e) {
+                    alert('请求失败');
+                }
+            };
+
+            const cancelOrder = async (tradeNo) => {
+                if (!confirm('确定要取消该订单吗？取消后订单将标记为已过期。')) return;
+                try {
+                    const res = await api.post(`/orders/${tradeNo}/cancel`);
+                    if (res.data.code === 1) {
+                        alert('订单已取消');
+                        loadOrders();
+                    } else {
+                        alert(res.data.msg || '取消失败');
+                    }
+                } catch (e) {
+                    alert('请求失败');
+                }
+            };
+
+            const loadWallets = async () => {
+                try {
+                    const res = await api.get('/wallets');
+                    if (res.data.code === 1) wallets.value = res.data.data || [];
+                } catch (e) {}
+            };
+
+            const loadChains = async () => {
+                try {
+                    const res = await api.get('/chains');
+                    if (res.data.code === 1) chains.value = res.data.data || [];
+                } catch (e) {}
+            };
+
+            const loadApiKey = async () => {
+                try {
+                    const res = await api.get('/key');
+                    if (res.data.code === 1) apiKey.value = res.data.data;
+                } catch (e) {}
+            };
+
+            const loadProfile = async () => {
+                try {
+                    const res = await api.get('/profile');
+                    if (res.data.code === 1) {
+                        Object.assign(profile, res.data.data);
+                    }
+                } catch (e) {}
+            };
+
+            const loadTelegramBot = async () => {
+                try {
+                    const res = await api.get('/telegram-bot');
+                    if (res.data.code === 1) {
+                        telegramBot.enabled = res.data.data.enabled;
+                        telegramBot.username = res.data.data.username || '';
+                    }
+                } catch (e) {}
+            };
+
+            const loadNotifySettings = async () => {
+                try {
+                    const res = await api.get('/notify-settings');
+                    if (res.data.code === 1 && res.data.data.notify_settings) {
+                        Object.assign(notifySettings, res.data.data.notify_settings);
+                    }
+                } catch (e) {}
+            };
+
+            const saveNotifySettings = async () => {
+                try {
+                    const res = await api.put('/notify-settings', { notify_settings: notifySettings });
+                    if (res.data.code === 1) {
+                        showToast('通知设置已保存');
+                    } else {
+                        showToast(res.data.msg, 'error');
+                    }
+                } catch (e) {
+                    showToast('保存失败', 'error');
+                }
+            };
+
+            const loadMonitorConfig = async () => {
+                monitorLoading.value = true;
+                try {
+                    const res = await api.get('/monitor-config');
+                    if (res.data.code === 1) {
+                        Object.assign(monitorConfig, res.data.data);
+                    }
+                } catch (e) {}
+                monitorLoading.value = false;
+            };
+
+            const resetApiKey = async () => {
+                if (!confirm('确定要重置API密钥吗？重置后原密钥将立即失效！')) return;
+                try {
+                    const res = await api.post('/key/reset');
+                    if (res.data.code === 1) {
+                        apiKey.value.key = res.data.data.key;
+                        showToast('密钥已重置');
+                    } else {
+                        showToast(res.data.msg, 'error');
+                    }
+                } catch (e) {
+                    showToast('重置失败', 'error');
+                }
+            };
+
+            const updateProfile = async () => {
+                try {
+                    const res = await api.put('/profile', profile);
+                    if (res.data.code === 1) {
+                        showToast('保存成功');
+                    } else {
+                        showToast(res.data.msg, 'error');
+                    }
+                } catch (e) {
+                    showToast('保存失败', 'error');
+                }
+            };
+
+            const changePassword = async () => {
+                try {
+                    const res = await api.post('/password', passwordForm);
+                    if (res.data.code === 1) {
+                        showToast('密码修改成功');
+                        passwordForm.old_password = '';
+                        passwordForm.new_password = '';
+                    } else {
+                        showToast(res.data.msg, 'error');
+                    }
+                } catch (e) {
+                    showToast('修改失败', 'error');
+                }
+            };
+
+            const editWalletFn = (wallet) => {
+                editWallet.value = { ...wallet };
+                showWalletModal.value = true;
+            };
+
+            const saveWallet = async () => {
+                try {
+                    const w = editWallet.value;
+                    let res;
+                    if (w.id) {
+                        res = await api.put(`/wallets/${w.id}`, w);
+                    } else {
+                        res = await api.post('/wallets', w);
+                    }
+                    if (res.data.code === 1) {
+                        showToast('保存成功');
+                        showWalletModal.value = false;
+                        loadWallets();
+                    } else {
+                        showToast(res.data.msg, 'error');
+                    }
+                } catch (e) {
+                    showToast('保存失败', 'error');
+                }
+            };
+
+            const deleteWallet = async (id) => {
+                if (!confirm('确定要删除这个钱包吗？')) return;
+                try {
+                    const res = await api.delete(`/wallets/${id}`);
+                    if (res.data.code === 1) {
+                        showToast('删除成功');
+                        loadWallets();
+                    } else {
+                        showToast(res.data.msg, 'error');
+                    }
+                } catch (e) {
+                    showToast('删除失败', 'error');
+                }
+            };
+
+            const uploadQRCode = async (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                const formData = new FormData();
+                formData.append('file', file);
+                try {
+                    const res = await api.post('/upload/qrcode', formData);
+                    if (res.data.code === 1) {
+                        editWallet.value.qrcode = res.data.data.url;
+                        // 如果返回了解析出的支付链接，设置为地址
+                        if (res.data.data.address) {
+                            editWallet.value.address = res.data.data.address;
+                        }
+                        showToast('收款码上传成功');
+                    } else {
+                        showToast(res.data.msg, 'error');
+                    }
+                } catch (e) {
+                    showToast('上传失败', 'error');
+                }
+            };
+
+            const copyToClipboard = (text) => {
+                navigator.clipboard.writeText(text).then(() => {
+                    showToast('已复制到剪贴板');
+                });
+            };
+
+            // 提现相关函数
+            const loadBalance = async () => {
+                try {
+                    const res = await api.get('/balance');
+                    if (res.data.code === 1) balance.value = res.data.data;
+                } catch (e) {}
+            };
+
+            const loadRechargeAddresses = async () => {
+                try {
+                    const res = await api.get('/recharge-addresses');
+                    if (res.data.code === 1) {
+                        rechargeAddresses.value = res.data.data.addresses || [];
+                        serviceLinks.telegram = res.data.data.service_telegram || '';
+                        serviceLinks.discord = res.data.data.service_discord || '';
+                    }
+                } catch (e) {}
+            };
+
+            const loadWithdrawals = async () => {
+                try {
+                    const res = await api.get('/withdrawals');
+                    if (res.data.code === 1) withdrawals.value = res.data.data || [];
+                } catch (e) {}
+            };
+
+            const submitWithdraw = async () => {
+                if (!withdrawForm.amount || withdrawForm.amount < 50) {
+                    showToast('提现金额至少50 USDT', 'error');
+                    return;
+                }
+                if (!withdrawForm.address_id) {
+                    showToast('请选择提现地址', 'error');
+                    return;
+                }
+                try {
+                    const res = await api.post('/withdrawals', withdrawForm);
+                    if (res.data.code === 1) {
+                        showToast('提现申请已提交');
+                        withdrawForm.amount = '';
+                        withdrawForm.address_id = '';
+                        withdrawForm.remark = '';
+                        loadBalance();
+                        loadWithdrawals();
+                    } else {
+                        showToast(res.data.msg, 'error');
+                    }
+                } catch (e) {
+                    showToast('提交失败', 'error');
+                }
+            };
+
+            // 提现地址相关函数
+            const loadWithdrawAddresses = async () => {
+                try {
+                    const res = await api.get('/withdraw-addresses');
+                    if (res.data.code === 1) {
+                        withdrawAddresses.value = res.data.data || [];
+                    }
+                } catch (e) {}
+            };
+
+            const saveWithdrawAddress = async () => {
+                if (!editAddress.value.address) {
+                    showToast('请输入地址', 'error');
+                    return;
+                }
+                try {
+                    const res = await api.post('/withdraw-addresses', editAddress.value);
+                    if (res.data.code === 1) {
+                        showToast(res.data.msg || '提交成功，等待审核');
+                        showAddressModal.value = false;
+                        editAddress.value = { chain: 'trc20' };
+                        loadWithdrawAddresses();
+                    } else {
+                        showToast(res.data.msg, 'error');
+                    }
+                } catch (e) {
+                    showToast('提交失败', 'error');
+                }
+            };
+
+            const setDefaultAddress = async (id) => {
+                try {
+                    const res = await api.put(`/withdraw-addresses/${id}`, { is_default: true });
+                    if (res.data.code === 1) {
+                        showToast('已设为默认');
+                        loadWithdrawAddresses();
+                    } else {
+                        showToast(res.data.msg, 'error');
+                    }
+                } catch (e) {
+                    showToast('设置失败', 'error');
+                }
+            };
+
+            const deleteWithdrawAddress = async (id) => {
+                if (!confirm('确定要删除这个提现地址吗？')) return;
+                try {
+                    const res = await api.delete(`/withdraw-addresses/${id}`);
+                    if (res.data.code === 1) {
+                        showToast('删除成功');
+                        loadWithdrawAddresses();
+                    } else {
+                        showToast(res.data.msg, 'error');
+                    }
+                } catch (e) {
+                    showToast('删除失败', 'error');
+                }
+            };
+
+            const getAddressChainName = (chain) => {
+                const names = {
+                    'trc20': 'TRC20',
+                    'bep20': 'BEP20',
+                    'polygon': 'Polygon',
+                    'optimism': 'Optimism'
+                };
+                return names[chain] || chain?.toUpperCase() || '-';
+            };
+
+            const getAddressStatusClass = (status) => {
+                const classes = {
+                    0: 'bg-yellow-100 text-yellow-800',
+                    1: 'bg-green-100 text-green-800',
+                    2: 'bg-red-100 text-red-800'
+                };
+                return classes[status] || 'bg-gray-100 text-gray-800';
+            };
+
+            const getAddressStatusText = (status) => {
+                const texts = { 0: '待审核', 1: '已通过', 2: '已拒绝' };
+                return texts[status] || '未知';
+            };
+
+            // 钱包模式相关函数
+            const loadWalletMode = async () => {
+                try {
+                    const res = await api.get('/wallet-mode');
+                    if (res.data.code === 1) {
+                        walletMode.value = res.data.data.wallet_mode || 3;
+                        feeRates.system = res.data.data.system_wallet_fee_rate || '0.02';
+                        feeRates.personal = res.data.data.personal_wallet_fee_rate || '0.01';
+                    }
+                } catch (e) {}
+            };
+
+            const saveWalletMode = async () => {
+                try {
+                    const res = await api.put('/wallet-mode', { wallet_mode: walletMode.value });
+                    if (res.data.code === 1) {
+                        showToast(res.data.msg || '钱包模式已保存');
+                    } else {
+                        showToast(res.data.msg, 'error');
+                    }
+                } catch (e) {
+                    showToast('保存失败', 'error');
+                }
+            };
+
+            const getWithdrawStatusClass = (status) => {
+                const classes = {
+                    0: 'bg-yellow-100 text-yellow-800',  // 待审核
+                    1: 'bg-blue-100 text-blue-800',      // 待打款
+                    2: 'bg-red-100 text-red-800',        // 已拒绝
+                    3: 'bg-green-100 text-green-800'     // 已完成
+                };
+                return classes[status] || 'bg-gray-100 text-gray-800';
+            };
+
+            const getWithdrawStatusText = (status) => {
+                const texts = { 0: '待审核', 1: '待打款', 2: '已拒绝', 3: '已完成' };
+                return texts[status] || '未知';
+            };
+
+            const getStatusClass = (status) => {
+                const classes = {
+                    0: 'bg-yellow-100 text-yellow-800',
+                    1: 'bg-green-100 text-green-800',
+                    2: 'bg-gray-100 text-gray-800'
+                };
+                return classes[status] || 'bg-gray-100 text-gray-800';
+            };
+
+            const getStatusText = (status) => {
+                const texts = { 0: '待支付', 1: '已支付', 2: '已过期' };
+                return texts[status] || '未知';
+            };
+
+            const getChainClass = (chain) => {
+                const classes = {
+                    trx: 'bg-orange-100 text-orange-800',
+                    trc20: 'bg-red-100 text-red-800',
+                    erc20: 'bg-blue-100 text-blue-800',
+                    bep20: 'bg-yellow-100 text-yellow-800',
+                    polygon: 'bg-purple-100 text-purple-800',
+                    optimism: 'bg-red-100 text-red-800',
+                    arbitrum: 'bg-blue-100 text-blue-800',
+                    avalanche: 'bg-red-100 text-red-800',
+                    base: 'bg-blue-100 text-blue-800',
+                    wechat: 'bg-green-100 text-green-800',
+                    alipay: 'bg-blue-100 text-blue-800'
+                };
+                return classes[chain] || 'bg-gray-100 text-gray-800';
+            };
+
+            const getPaymentTypeName = (type) => {
+                const names = {
+                    'trx': 'TRX',
+                    'trc20': 'TRC20',
+                    'erc20': 'ERC20',
+                    'bep20': 'BEP20',
+                    'polygon': 'Polygon',
+                    'optimism': 'Optimism',
+                    'arbitrum': 'Arbitrum',
+                    'avalanche': 'Avalanche',
+                    'base': 'Base',
+                    'wechat': '微信支付',
+                    'alipay': '支付宝'
+                };
+                return names[type] || (type ? type.toUpperCase() : '-');
+            };
+
+            const getReceivedAmount = (order) => {
+                const type = order.type || order.chain;
+                if (type === 'wechat' || type === 'alipay') {
+                    return `¥${order.money}`;
+                }
+                if (type === 'trx') {
+                    return `${order.usdt_amount || '-'} TRX`;
+                }
+                return `${order.usdt_amount || '-'} USDT`;
+            };
+
+            const formatTime = (time) => {
+                if (!time) return '';
+                return new Date(time).toLocaleString('zh-CN');
+            };
+
+            watch(currentTab, (tab) => {
+                if (tab === 'dashboard') loadDashboard();
+                else if (tab === 'orders') loadOrders();
+                else if (tab === 'wallets') loadWallets();
+                else if (tab === 'chains') loadChains();
+                else if (tab === 'apikey') loadApiKey();
+                else if (tab === 'withdraw') { loadBalance(); loadWithdrawals(); loadWithdrawAddresses(); loadRechargeAddresses(); }
+                else if (tab === 'settings') { loadProfile(); loadWalletMode(); loadWithdrawAddresses(); loadTelegramBot(); loadApiKey(); loadNotifySettings(); loadMonitorConfig(); }
+            });
+
+            onMounted(() => {
+                const savedToken = localStorage.getItem('merchant_token');
+                const savedMerchant = localStorage.getItem('merchant_info');
+                if (savedToken && savedMerchant) {
+                    token.value = savedToken;
+                    merchant.value = JSON.parse(savedMerchant);
+                    isLoggedIn.value = true;
+                    loadDashboard();
+                }
+            });
+
+            return {
+                isLoggedIn, loading, loginError, currentTab, merchant,
+                loginForm, dashboard, orders, orderTotal, orderPage, orderFilter,
+                trendData, trendPeriod, trendPeriods, ordersChart, amountChart,
+                wallets, chains, apiKey, showKey, profile, passwordForm,
+                showWalletModal, editWallet, toast,
+                balance, withdrawals, withdrawForm, walletMode, feeRates,
+                withdrawAddresses, showAddressModal, editAddress, telegramBot, notifySettings,
+                showRechargeModal, rechargeAddresses, serviceLinks, monitorConfig, monitorLoading,
+                showTestPaymentModal, testPayment,
+                approvedAddresses, selectedWithdrawAddress, canSubmitWithdraw,
+                login, logout, loadDashboard, loadOrders, confirmPayment, cancelOrder, createTestOrder, loadWallets, loadChains,
+                loadTrendData, loadApiKey, loadProfile, loadTelegramBot, loadNotifySettings, saveNotifySettings, loadMonitorConfig,
+                resetApiKey, updateProfile, changePassword,
+                editWalletFn, saveWallet, deleteWallet, uploadQRCode, copyToClipboard,
+                loadBalance, loadWithdrawals, submitWithdraw, loadRechargeAddresses,
+                loadWalletMode, saveWalletMode,
+                loadWithdrawAddresses, saveWithdrawAddress, setDefaultAddress, deleteWithdrawAddress,
+                getStatusClass, getStatusText, getChainClass, getPaymentTypeName, getReceivedAmount, formatTime,
+                getWithdrawStatusClass, getWithdrawStatusText,
+                getAddressChainName, getAddressStatusClass, getAddressStatusText
+            };
+        }
+    });
+    app.config.compilerOptions.delimiters = ['[[', ']]'];
+    app.config.globalProperties.I18n = I18n;
+    app.config.globalProperties.$t = (key, params) => I18n.t(key, params);
+    app.mount('#app');
+
+    // 初始化国际化
+    I18n.init().then(() => {
+        I18n.createLanguageSelector('loginLangSelector', 'light');
+        I18n.createLanguageSelector('mainLangSelector', 'light');
+    });
+    </script>
+</body>
+</html>

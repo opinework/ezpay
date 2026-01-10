@@ -1,0 +1,42 @@
+#!/usr/bin/make -f
+
+export DH_VERBOSE=1
+export CGO_ENABLED=0
+export GOOS=linux
+
+%:
+	dh $@
+
+override_dh_auto_build:
+	# Determine architecture
+	if [ "$(DEB_HOST_ARCH)" = "amd64" ]; then \
+		export GOARCH=amd64; \
+	elif [ "$(DEB_HOST_ARCH)" = "arm64" ]; then \
+		export GOARCH=arm64; \
+	fi; \
+	go build -ldflags="-s -w -X main.Version=$(shell dpkg-parsechangelog -S Version)" -o ezpay .
+
+override_dh_auto_install:
+	# Install binary
+	install -Dm755 ezpay $(CURDIR)/debian/ezpay/usr/bin/ezpay
+
+	# Install config
+	install -Dm644 config.yaml $(CURDIR)/debian/ezpay/etc/ezpay/config.yaml
+
+	# Install web files
+	install -dm755 $(CURDIR)/debian/ezpay/usr/share/ezpay/web
+	cp -r web/templates $(CURDIR)/debian/ezpay/usr/share/ezpay/web/
+	cp -r web/static $(CURDIR)/debian/ezpay/usr/share/ezpay/web/
+
+	# Install systemd service
+	install -Dm644 pkg/debian/ezpay.service $(CURDIR)/debian/ezpay/lib/systemd/system/ezpay.service
+
+	# Create data directories
+	install -dm755 $(CURDIR)/debian/ezpay/var/lib/ezpay
+	install -dm755 $(CURDIR)/debian/ezpay/var/log/ezpay
+
+override_dh_auto_test:
+	# Skip tests during package build
+
+override_dh_strip:
+	# Binary already stripped with -s -w

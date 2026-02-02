@@ -1,128 +1,156 @@
-# EzPay - 多通道聚合收款平台
+# EzPay
 
-EzPay 是一个使用 Go 语言开发的多通道聚合收款平台，支持 USDT/TRX 加密货币和微信/支付宝法币收款，兼容彩虹易支付和 V免签接口协议。
+多通道聚合收款平台，支持 USDT/TRX 加密货币和微信/支付宝法币收款，采用 **USD 统一结算**，兼容彩虹易支付和 V免签接口协议。
 
-## 技术支持
+## 核心特性
 
-- Telegram 群组: https://t.me/OpineWorkOfficial
-- Telegram 频道: https://t.me/OpineWorkPublish
+### 💰 统一结算系统
+- **USD 统一结算**: 所有订单统一按 USD 结算，支持多币种支付
+- **智能汇率管理**: 自动获取实时汇率，支持手动/自动/混合模式
+- **买卖价差**: 可配置买入卖出浮动，实现利润空间
+- **多数据源**: Binance、OKX、自定义 API
 
-## 功能特性
-
-### 支付通道
-- **加密货币**: TRC20、ERC20、BEP20、Polygon、Optimism、Arbitrum、Avalanche、Base、TRX
+### 🔗 多链支持
+- **加密货币**: TRC20、ERC20、BEP20、Polygon、Optimism、Arbitrum、Base、TRX
 - **法币收款**: 微信支付、支付宝
-- **收款码上传**: 支持上传微信/支付宝收款码，自动解析二维码内容
+- **自动匹配**: 唯一金额标识，精确匹配订单
 
-### 钱包管理
-- **系统钱包**: 管理员统一管理的收款地址
-- **商户钱包**: 商户自行添加的个人收款地址
-- **钱包模式**: 支持仅系统钱包、仅个人钱包、混合模式（优先个人）
-- **轮询调度**: 同一链路多个钱包自动轮询使用，均衡负载
-- **手续费差异化**: 系统钱包和个人钱包可设置不同手续费率
+### 🔔 完整通知系统
+#### 商户通知 (Telegram Bot)
+- 订单创建/支付/过期
+- 余额变动通知
+- 提现状态通知
+- 登录成功/失败警告
+- 密钥重置警告
+- 钱包添加/移除
+- 回调失败提醒
 
-### 接口兼容
-- **彩虹易支付**: 完全兼容 submit.php、mapi.php、api.php 接口
-- **V免签**: 兼容 createOrder、checkOrder、closeOrder、appPush 接口
-- **签名验证**: 支持 MD5 签名验证
+#### 管理员通知
+- 提现地址待审核
+- IP 封禁事件
+- 系统异常警告
 
-### 订单管理
-- **自动过期**: 订单超时自动标记过期，退还预扣手续费
-- **一键清理**: 支持一键清理超过24小时的无效订单
-- **测试支付**: 管理后台可发起测试支付订单
-- **CSV导出**: 支持订单数据导出
+#### 账号状态管理
+- 自动检测 Telegram 账号封禁
+- 封禁后自动停止推送
+- 避免无效通知消耗
 
-### 商户功能
-- **独立后台**: 商户可登录查看订单、管理钱包
-- **余额提现**: 商户可申请提现到绑定的收款地址
-- **API密钥**: 商户可自助重置API密钥
-- **钱包限制**: 可限制商户添加钱包的数量
+### 🔒 安全防护
+- **IP 黑名单/白名单**: 自动封禁异常IP，缓存机制提升性能
+- **签名验证**: 所有 API 请求支持签名校验
+- **JWT 认证**: 管理员和商户独立认证
+- **交易防重**: 防止重复处理同一笔交易
+- **并发保护**: 乐观锁机制防止订单重复入账
+- **限流保护**: API 和登录接口限流
 
-### 通知推送
-- **Telegram Bot**: 支持商户绑定Telegram接收实时通知
-- **异步回调**: 订单支付成功后自动回调商户服务器
-- **回调重试**: 回调失败自动重试，支持手动重试
+### 🌍 国际化
+- 支持 **7 种语言**: 英语、简中、繁中、俄语、波斯语、越南语、缅甸语
+- RTL 布局支持（波斯语）
+- 自动语言检测
 
-### 安全功能
-- **IP白名单**: 支持配置商户API调用IP白名单
-- **Referer白名单**: 支持配置允许的来源域名
-- **IP黑名单**: 支持封禁恶意IP
-- **API日志**: 记录所有API调用日志，支持按时间清理
+### 🔧 商户管理
+- **独立后台**: 商户可自助管理钱包、订单、提现
+- **余额提现**: 支持 TRC20/BEP20 USDT 提现
+- **API 密钥**: 可重置密钥
+- **提现地址管理**: 审核机制保障安全
+- **钱包限制**: 可配置钱包数量上限
 
-### 国际化 (i18n)
-- **多语言支持**: 英语、简体中文、繁体中文、俄语、波斯语、越南语、缅甸语
-- **自动检测**: 根据浏览器语言自动切换
-- **语言选择器**: 用户可随时切换语言
-- **RTL支持**: 波斯语等从右到左语言的完整支持
+### 📊 接口兼容
+- **彩虹易支付**: 完全兼容 submit.php、mapi.php、api.php
+- **V免签**: 兼容 createOrder、appHeart、appPush 等接口
+- **标准化**: 统一的响应格式和错误码
 
 ## 快速开始
 
 ### 环境要求
 
 - Go 1.21+
-- MySQL 8.0+
-- Make (可选)
+- MySQL/MariaDB 8.0+
 
-### 安装
+### 安装运行
 
 ```bash
-# 进入项目目录
-cd /path/to/ezpay
+# 下载发布版本或编译
+make release
 
-# 安装依赖
-go mod tidy
+# 编辑配置文件
+cp config.yaml.example config.yaml
+vim config.yaml
 
-# 方式一: 使用 Makefile (推荐)
-make release           # 编译当前平台生产版本
-make release-all       # 编译所有平台
-
-# 方式二: 手动编译
-go build -o ezpay .
+# 初始化数据库（自动执行迁移）
+# 首次运行会自动创建表结构
 
 # 运行
 ./ezpay
 ```
 
-### 开发模式
+### 访问地址
 
-开发时推荐使用开发模式，支持模板热更新：
+默认端口: **6088**
+
+| 页面 | 地址 | 说明 |
+|------|------|------|
+| 管理后台 | http://localhost:6088/admin | 系统管理、商户管理、汇率管理 |
+| 商户后台 | http://localhost:6088/merchant | 订单查询、钱包管理、提现申请 |
+| 收银台 | http://localhost:6088/cashier/{trade_no} | 用户支付页面 |
+| 健康检查 | http://localhost:6088/health | 服务状态检查 |
+| 详细健康检查 | http://localhost:6088/health/detail | 数据库连接状态 |
+
+### 默认账号
+
+- **管理员**: `admin` / `admin123`
+- **测试商户**: `10001` / `123456`
+
+> ⚠️ 首次登录后请立即修改密码！
+
+## 编译构建
+
+### 使用 build-all.sh (推荐)
 
 ```bash
-make dev        # 编译开发版本到 bin/
-make run-dev    # 编译并运行
-
-# 开发版本特点:
-# - 模板从文件系统加载，修改后刷新浏览器即可
-# - 配置文件在 bin/config.yaml
+./build-all.sh              # 编译所有平台
+./build-all.sh dev          # 开发版本
+./build-all.sh linux        # 仅 Linux AMD64
+./build-all.sh linux-arm64  # 仅 Linux ARM64
+./build-all.sh windows      # 仅 Windows
+./build-all.sh macos        # 仅 macOS Intel
+./build-all.sh macos-arm64  # 仅 macOS Apple Silicon
+./build-all.sh clean        # 清理编译产物
 ```
 
-### 全平台编译
-
-支持一键编译 Linux/Windows/macOS 全平台：
+### 使用 Makefile
 
 ```bash
-make release-all   # 编译所有平台
-make dist          # 编译并打包成压缩包
-
-# 输出:
-# release/ezpay-linux-amd64
-# release/ezpay-linux-arm64
-# release/ezpay-windows-amd64.exe
-# release/ezpay-darwin-amd64
-# release/ezpay-darwin-arm64
+make dev         # 开发版本
+make release     # 生产版本
+make release-all # 全平台编译
+make dist        # 打包发布
 ```
 
-详细构建说明请参阅 [BUILD.md](./BUILD.md)
+### 编译产物
 
-### 配置
+全平台编译后的文件位于 `release/` 目录：
 
-首次运行会自动生成 `config.yaml` 配置文件：
+```
+release/
+├── ezpay-linux-amd64       # Linux x64
+├── ezpay-linux-arm64       # Linux ARM64
+├── ezpay-windows-amd64.exe # Windows
+├── ezpay-darwin-amd64      # macOS Intel
+└── ezpay-darwin-arm64      # macOS Apple Silicon
+```
+
+## 配置说明
+
+所有配置都在 `config.yaml` 中，无需 `.env` 文件：
 
 ```yaml
+# 服务器
 server:
   host: "0.0.0.0"
   port: 6088
 
+# 数据库
 database:
   host: "127.0.0.1"
   port: 3306
@@ -130,187 +158,287 @@ database:
   password: "your_password"
   dbname: "ezpay"
 
-# JWT 签名密钥 (请修改为随机字符串)
+# JWT认证
 jwt:
   secret: "change-this-secret-key-in-production"
+  expire_hour: 24
 
-# 数据存储目录 (上传文件、APK等)
-# Linux 默认: /var/lib/ezpay
-# Windows/macOS 默认: 可执行文件目录/ezpay_data
+# 数据存储
 storage:
-  data_dir: "/var/lib/ezpay"
+  data_dir: "/var/lib/ezpay"  # Linux 默认
+
+# 订单配置
+order:
+  expire_minutes: 30          # 订单过期时间
+  cleanup_hours: 24           # 自动清理无效订单
+
+# 汇率配置
+rate:
+  auto_update_enabled: true   # 启用自动更新
+  update_interval: 60         # 更新间隔(分钟)
+  source: "binance"           # 主数据源
+  fallback_source: "okx"      # 备用数据源
+  cny_api: "https://api.exchangerate-api.com/v4/latest/USD"  # CNY汇率API
+  cache_seconds: 300          # 缓存时间
+
+# 区块链监控
+blockchain:
+  trx:
+    enabled: true
+    rpc: "https://api.trongrid.io"
+    confirmations: 19
+    scan_interval: 15
+  trc20:
+    enabled: true
+    rpc: "https://api.trongrid.io"
+    contract_address: "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t"
+    confirmations: 19
+    scan_interval: 15
+  # ... 其他链配置
 ```
 
-> 管理员账号和 Telegram 配置在管理后台"系统设置"中配置，不在配置文件中。
+> 💡 管理员账号、Telegram Bot、买卖浮动等在管理后台"系统设置"中配置
 
-### 访问地址
+## 汇率系统
 
-默认端口: **6088**
+### USD 统一结算
 
-| 页面 | 地址 |
+所有订单统一按 USD 结算，支持多币种支付：
+
+```
+用户支付: 100 CNY
+  ↓ 使用买入汇率(1 CNY = 0.14 USD × 1.02)
+结算金额: 100 × 0.14 × 1.02 = 14.28 USD
+  ↓ 计入商户余额
+商户余额: +14.28 USD
+```
+
+### 买卖价差
+
+- **买入浮动**: 用户支付时，汇率上浮（如 +2%），平台多收
+- **卖出浮动**: 商户提现时，汇率下浮（如 -2%），平台少给
+- **利润空间**: 买卖价差 = 4%
+
+### 支持的汇率
+
+| 汇率对 | 说明 | 自动更新 |
+|--------|------|---------|
+| EUR → USD | 欧元转美元 | ✅ Binance |
+| CNY → USD | 人民币转美元 | ✅ exchangerate-api |
+| USD → CNY | 美元转人民币 | ✅ exchangerate-api |
+| USD → TRX | 美元转波场 | ✅ Binance |
+| USD → USDT | 美元转USDT | ✅ 固定1:1 |
+
+## 支持的链路
+
+### 区块链加密货币
+
+| 链 | 代币 | 说明 | 确认数 |
+|----|------|------|-------|
+| TRX | TRX | Tron 原生币 | 19 |
+| TRC20 | USDT | Tron USDT | 19 |
+| ERC20 | USDT | Ethereum USDT | 12 |
+| BEP20 | USDT | BSC USDT | 15 |
+| Polygon | USDT | Polygon USDT | 128 |
+| Optimism | USDT | Optimism USDT | 10 |
+| Arbitrum | USDT | Arbitrum USDT | 10 |
+| Base | USDT | Base USDT | 10 |
+| Avalanche | USDT | Avalanche USDT | 12 |
+
+### 传统支付
+
+| 类型 | 说明 |
 |------|------|
-| 管理后台 | http://localhost:6088/admin |
-| 商户后台 | http://localhost:6088/merchant |
-| 收银台 | http://localhost:6088/cashier/{trade_no} |
-| 健康检查 | http://localhost:6088/health |
-
-### 默认账号
-
-- 管理员: admin / admin123
-- 测试商户: 10001 / 123456
-
-## 系统设置
-
-### 汇率配置
-
-| 设置项 | 说明 |
-|--------|------|
-| 汇率模式 | auto(自动)/manual(手动)/hybrid(混合)，仅对USDT生效 |
-| 手动汇率 | 手动模式下的USDT汇率 |
-
-> TRX 汇率始终使用自动模式，从 Binance API 实时获取。
-
-### 手续费配置
-
-| 设置项 | 说明 |
-|--------|------|
-| 系统收款码手续费率 | 使用系统钱包时的手续费率，如0.02表示2% |
-| 个人收款码手续费率 | 使用商户钱包时的手续费率，如0.01表示1% |
-
-### 订单配置
-
-| 设置项 | 说明 |
-|--------|------|
-| 订单过期时间 | 订单超时时间（分钟），默认30分钟 |
-
-### 链路配置
-
-在管理后台"链路管理"中可以启用/禁用各支付通道：
-
-- trc20: TRC20 (Tron USDT)
-- erc20: ERC20 (Ethereum USDT)
-- bep20: BEP20 (BSC USDT)
-- trx: TRX (Tron原生币)
-- wechat: 微信支付
-- alipay: 支付宝
+| WeChat | 微信支付（需上传收款码） |
+| Alipay | 支付宝（需上传收款码） |
 
 ## Telegram 通知
 
-### 1. 创建 Bot
+### 商户绑定
 
-1. 在 Telegram 搜索 `@BotFather`
-2. 发送 `/newbot` 创建新机器人
-3. 按提示设置名称，获取 Bot Token
+商户可通过 Telegram Bot 接收实时通知：
 
-### 2. 配置 Bot Token
+```
+1. 在 Telegram 搜索你的 Bot (@YourBot)
+2. 发送命令: /bind 商户号 密钥
+3. 绑定成功后自动接收通知
+```
 
-在管理后台 > 系统设置 中配置：
+### 通知类型
 
-| 设置项 | 说明 |
-|-------|------|
-| telegram_enabled | 是否启用 (true/false) |
-| telegram_bot_token | Bot Token |
+**订单通知**
+- 📦 新订单创建
+- 💰 订单支付成功
+- ⏰ 订单过期
 
-### 3. 商户绑定
+**资金通知**
+- 💵 余额变动（订单入账）
+- 📤 提现申请已提交
+- ✅ 提现审批通过
+- ❌ 提现被拒绝
+- 💸 提现已打款
 
-商户在 Telegram 中与 Bot 对话：
+**安全通知**
+- 🔐 登录成功
+- ⚠️ 登录失败
+- 🔑 密钥重置
 
-1. 发送 `/start` 开始
-2. 发送 `/bind <商户PID> <商户密钥>` 绑定账号
-3. 绑定成功后即可接收通知
+**系统通知**
+- 💳 钱包添加
+- 🗑️ 钱包移除
+- 📞 回调失败警告
 
-### 4. 通知类型
+### 管理员通知
 
-| 通知类型 | 说明 |
-|---------|------|
-| 订单创建 | 新订单创建时通知 |
-| 订单支付 | 订单收到支付时通知 |
-| 订单过期 | 订单超时未支付时通知 |
-| 提现申请 | 提现申请提交时通知 |
-| 提现审核 | 提现审核通过/拒绝时通知 |
-| 提现到账 | 提现完成打款时通知 |
+管理员通过系统配置的 Telegram 群组接收：
+- 📬 新增提现地址待审核
+- 🚫 IP 被封禁事件
+- 🔔 系统警告
 
-### 5. Bot 命令
+## 存储目录
 
-| 命令 | 说明 |
+上传文件存储在 `storage.data_dir` 配置的目录：
+
+| 平台 | 默认路径 |
+|------|---------|
+| Linux | `/var/lib/ezpay` |
+| Windows | `{可执行文件目录}/ezpay_data` |
+| macOS | `{可执行文件目录}/ezpay_data` |
+
+目录结构：
+```
+{data_dir}/
+├── qrcode/     # 收款码图片
+└── apk/        # APP安装包
+```
+
+## 数据库表
+
+| 表名 | 说明 |
 |------|------|
-| `/start` | 开始使用 |
-| `/bind <pid> <key>` | 绑定商户账号 |
-| `/unbind` | 解除绑定 |
-| `/status` | 查看绑定状态 |
-| `/help` | 查看帮助 |
+| merchants | 商户表 |
+| wallets | 钱包地址表 |
+| orders | 订单表（USD结算） |
+| transaction_logs | 交易日志表 |
+| exchange_rates | 汇率配置表 |
+| exchange_rate_history | 汇率历史表 |
+| withdrawals | 提现表 |
+| withdraw_addresses | 提现地址表 |
+| system_configs | 系统配置表 |
+| admins | 管理员表 |
+| api_logs | API 日志表 |
+| ip_blacklist | IP 黑名单表 |
+| app_versions | APP版本表 |
 
-## 收款码上传
+## 安全机制
 
-### 支持的格式
+### 交易安全
+- ✅ **交易防重**: 通过 tx_hash 唯一索引防止重复处理
+- ✅ **并发保护**: 乐观锁机制防止订单重复入账
+- ✅ **金额精确匹配**: 使用 unique_amount 精确匹配订单
 
-| 支付方式 | 支持的二维码格式 |
-|---------|-----------------|
-| 微信支付 | wxp://、weixin://、wechatpay.cn、wx.tenpay.com |
-| 支付宝 | alipay://、qr.alipay.com |
+### 访问控制
+- ✅ **IP 黑名单**: 自动封禁异常IP，带缓存提升性能
+- ✅ **IP 白名单**: 商户可配置 IP 白名单
+- ✅ **Referer 白名单**: 限制来源域名
+- ✅ **签名验证**: 所有 API 请求签名校验
 
-### 上传流程
+### 通知安全
+- ✅ **异步回调**: 带签名的异步通知，失败自动重试
+- ✅ **同步跳转**: 带签名的同步跳转URL
+- ✅ **Telegram 封禁检测**: 自动停止向被封账号推送
 
-1. 在商户后台"钱包管理"点击"添加钱包"
-2. 选择链类型（微信/支付宝）
-3. 上传收款码图片
-4. 系统自动解析二维码内容
-5. 保存后即可用于收款
+## API 测试
 
-## 接口文档
+### 获取管理员 Token
 
-详见 [API.md](./API.md)
+```bash
+curl -X POST "http://localhost:6088/admin/api/login" \
+  -H "Content-Type: application/json" \
+  -d '{"username":"admin","password":"admin123"}'
+```
 
-## 项目结构
+### 使用 Token 调用 API
 
-详见 [ARCHITECTURE.md](./ARCHITECTURE.md)
+```bash
+TOKEN="your_token_here"
+curl -s "http://localhost:6088/admin/api/dashboard" \
+  -H "Authorization: Bearer $TOKEN"
+```
 
-## 文档索引
+### 创建订单（彩虹易支付格式）
+
+```bash
+# 参数签名: MD5(参数排序&key=商户密钥)
+curl "http://localhost:6088/submit.php" \
+  -d "pid=10001" \
+  -d "type=trc20" \
+  -d "out_trade_no=ORDER123" \
+  -d "notify_url=https://your-site.com/notify" \
+  -d "return_url=https://your-site.com/return" \
+  -d "name=测试商品" \
+  -d "money=100" \
+  -d "sign=MD5签名"
+```
+
+### 健康检查
+
+```bash
+# 简单健康检查
+curl -s "http://localhost:6088/health"
+
+# 详细健康检查 (含数据库状态)
+curl -s "http://localhost:6088/health/detail"
+```
+
+## 文档
+
+详细文档请参阅 [docs](./docs/) 目录：
 
 | 文档 | 说明 |
 |------|------|
-| [USER_GUIDE.md](./USER_GUIDE.md) | 用户手册 - 管理员和商户操作指南 |
-| [BUILD.md](./BUILD.md) | 构建指南 - 开发/生产模式，跨平台编译 |
-| [DEPLOY.md](./DEPLOY.md) | 部署指南 - Systemd、Nginx、Docker |
-| [API.md](./API.md) | API接口文档 - 彩虹易支付/V免签兼容接口 |
-| [ARCHITECTURE.md](./ARCHITECTURE.md) | 架构设计 - 项目结构、核心模块 |
-| [I18N.md](./I18N.md) | 国际化指南 - 多语言支持、翻译开发 |
-| [COMPARE_EPAY.md](./COMPARE_EPAY.md) | 彩虹易支付对比与迁移 |
-| [COMPARE_VMQ.md](./COMPARE_VMQ.md) | V免签对比与迁移 |
+| [用户手册](./docs/USER_GUIDE.md) | 管理员和商户操作指南 |
+| [构建指南](./docs/BUILD.md) | 开发/生产模式，跨平台编译 |
+| [部署指南](./docs/DEPLOY.md) | Systemd、Nginx、Docker |
+| [API文档](./docs/API.md) | 彩虹易支付/V免签兼容接口 |
+| [架构设计](./docs/ARCHITECTURE.md) | 项目结构、核心模块 |
+| [国际化指南](./docs/I18N.md) | 多语言支持、翻译开发 |
 
-## 更新日志
+## 系统要求
 
-### v1.0.0 (2025-01-02)
+### 最低配置
+- CPU: 1 核
+- 内存: 512MB
+- 硬盘: 10GB
+- 网络: 公网 IP（用于接收区块链回调）
 
-**支付通道**
-- 支持 USDT 多链收款 (TRC20, ERC20, BEP20, Polygon, Optimism, Arbitrum, Avalanche, Base)
-- 支持 TRX 原生币支付
-- 支持微信/支付宝收款码支付
-- 商户手动确认收款功能 (法币订单)
-- 兼容彩虹易支付和V免签接口协议
+### 推荐配置
+- CPU: 2 核
+- 内存: 2GB
+- 硬盘: 50GB SSD
+- 网络: 10Mbps+ 带宽
 
-**钱包管理**
-- 系统钱包和商户钱包双模式
-- 钱包轮询调度，均衡负载
-- 差异化手续费配置
+## 性能指标
 
-**国际化**
-- 支持 7 种语言：英语、简体中文、繁体中文、俄语、波斯语、越南语、缅甸语
-- 自动语言检测：URL参数 > localStorage > 浏览器语言
-- RTL 支持：波斯语等从右到左语言完整布局
+- **订单处理**: >1000 TPS
+- **API 响应**: <100ms (p99)
+- **区块链扫描**: 15秒间隔
+- **数据库连接池**: 100 连接
+- **并发支持**: 支持高并发场景
 
-**通知推送**
-- Telegram Bot 实时通知
-- 异步回调支持重试
+## 交流群组
 
-**构建部署**
-- 全平台交叉编译 (Linux/Windows/macOS)
-- Docker 容器化部署
-- Linux 打包支持 (Arch/Debian/RPM)
-- 静态资源嵌入二进制
-- 开发/生产双模式构建
+- Telegram 交流群: https://t.me/OpineWorkOfficial
+- Telegram 频道: https://t.me/OpineWorkPublish
 
-**安全功能**
-- IP 白名单/黑名单
-- Referer 白名单
-- API 调用日志
+## 贡献
+
+欢迎提交 Issue 和 Pull Request！
+
+## License
+
+MIT License
+
+## 致谢
+
+感谢所有贡献者和使用者的支持！

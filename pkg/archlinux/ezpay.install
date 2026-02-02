@@ -7,6 +7,10 @@ post_install() {
         useradd -r -g ezpay -d /var/lib/ezpay -s /usr/bin/nologin -c "EzPay Payment Gateway" ezpay
     fi
 
+    # Create data directories
+    mkdir -p /var/lib/ezpay/uploads
+    mkdir -p /var/lib/ezpay/qrcode
+
     # Set ownership
     chown -R ezpay:ezpay /var/lib/ezpay
     chown -R ezpay:ezpay /var/log/ezpay
@@ -17,9 +21,14 @@ post_install() {
     chmod 600 /etc/ezpay/config.yaml
 
     echo "==> EzPay installed successfully!"
-    echo "==> Please edit /etc/ezpay/config.yaml before starting the service"
-    echo "==> To start: systemctl start ezpay"
-    echo "==> To enable on boot: systemctl enable ezpay"
+    echo "==> "
+    echo "==> Next steps:"
+    echo "==>   1. Edit config:    /etc/ezpay/config.yaml"
+    echo "==>   2. Init database:  /usr/share/ezpay/db/migrate.sh migrate"
+    echo "==>   3. Start service:  systemctl start ezpay"
+    echo "==>   4. Enable on boot: systemctl enable ezpay"
+    echo "==> "
+    echo "==> Database scripts location: /usr/share/ezpay/db/"
 }
 
 post_upgrade() {
@@ -27,7 +36,10 @@ post_upgrade() {
     chown -R ezpay:ezpay /usr/share/ezpay
 
     echo "==> EzPay upgraded successfully!"
-    echo "==> Please restart the service: systemctl restart ezpay"
+    echo "==> "
+    echo "==> Next steps:"
+    echo "==>   1. Apply migrations: /usr/share/ezpay/db/migrate.sh migrate"
+    echo "==>   2. Restart service:  systemctl restart ezpay"
 }
 
 pre_remove() {

@@ -36,8 +36,12 @@ type BlockchainService struct {
 	cancel       context.CancelFunc
 	wg           sync.WaitGroup
 	listeners    map[string]*ChainListener
+	rpcClients   map[string]*RPCClient  // RPC 客户端（支持重试和故障转移）
+	metrics      *BlockchainMetrics     // 监控指标
 	mu           sync.RWMutex
 	walletCache  *WalletCache
+	gasPrices    map[string]float64     // Gas 价格缓存
+	gasPriceMu   sync.RWMutex
 }
 
 // WalletCache 钱包地址缓存
@@ -115,10 +119,14 @@ func (c *WalletCache) Invalidate() {
 type ChainListener struct {
 	chain           string
 	rpc             string
+	rpcBackups      []string           // RPC 备用节点
 	contractAddress string
 	confirmations   int
 	scanInterval    int
+	baseScanInterval int               // 基础扫描间隔
 	lastBlock       uint64
+	reorgDepth      int                // 重组检测深度
+	blockHistory    []uint64           // 区块历史（用于重组检测）
 	running         bool
 	enabled         bool
 	stopCh          chan struct{}
@@ -146,7 +154,10 @@ func GetBlockchainService() *BlockchainService {
 			ctx:         ctx,
 			cancel:      cancel,
 			listeners:   make(map[string]*ChainListener),
+			rpcClients:  make(map[string]*RPCClient),
+			metrics:     NewBlockchainMetrics(),
 			walletCache: NewWalletCache(30 * time.Second), // 钱包缓存30秒
+			gasPrices:   make(map[string]float64),
 		}
 	})
 	return blockchainService
@@ -188,16 +199,28 @@ func (s *BlockchainService) Init(cfg *config.Config) {
 	}
 
 	for chain, chainCfg := range chainConfigs {
+		// 创建 RPC 客户端（支持多节点）
+		rpcEndpoints := []string{chainCfg.RPC}
+		// TODO: 从配置中读取备用 RPC 节点
+		s.rpcClients[chain] = NewRPCClient(rpcEndpoints)
+
 		s.listeners[chain] = &ChainListener{
-			chain:           chain,
-			rpc:             chainCfg.RPC,
-			contractAddress: chainCfg.ContractAddress,
-			confirmations:   chainCfg.Confirmations,
-			scanInterval:    chainCfg.ScanInterval,
-			enabled:         chainCfg.Enabled,
-			stopCh:          make(chan struct{}),
+			chain:            chain,
+			rpc:              chainCfg.RPC,
+			rpcBackups:       []string{}, // TODO: 从配置读取
+			contractAddress:  chainCfg.ContractAddress,
+			confirmations:    chainCfg.Confirmations,
+			scanInterval:     chainCfg.ScanInterval,
+			baseScanInterval: chainCfg.ScanInterval,
+			reorgDepth:       10, // 重组检测深度
+			blockHistory:     make([]uint64, 0, 20),
+			enabled:          chainCfg.Enabled,
+			stopCh:           make(chan struct{}),
 		}
 	}
+
+	// 启动 Gas 价格监控
+	go s.monitorGasPrices()
 }
 
 // Start 启动所有已启用的监听器
@@ -266,6 +289,8 @@ func (s *BlockchainService) runListener(chain string, listener *ChainListener) {
 
 // scanChain 扫描链上交易
 func (s *BlockchainService) scanChain(listener *ChainListener) {
+	startTime := s.metrics.RecordScanStart(listener.chain)
+
 	// 从缓存获取收款地址
 	addresses := s.walletCache.GetAddresses(listener.chain)
 	if len(addresses) == 0 {
@@ -277,22 +302,41 @@ func (s *BlockchainService) scanChain(listener *ChainListener) {
 
 	switch listener.chain {
 	case "trx":
-		transfers, err = s.scanTRX(listener, addresses)
+		transfers, err = s.scanTRXImproved(listener, addresses)
 	case "trc20":
-		transfers, err = s.scanTRC20(listener, addresses)
+		transfers, err = s.scanTRC20Improved(listener, addresses)
 	case "erc20", "bep20", "polygon", "optimism", "arbitrum", "avalanche", "base":
-		transfers, err = s.scanEVM(listener, addresses)
+		transfers, err = s.scanEVMImproved(listener, addresses)
 	}
 
 	if err != nil {
-		log.Printf("Error scanning %s: %v", listener.chain, err)
+		log.Printf("[%s] Scan error: %v", listener.chain, err)
+		s.metrics.RecordScanFailure(listener.chain, err)
+
+		// 检查是否需要告警
+		if shouldAlert, msg := s.metrics.ShouldAlert(listener.chain); shouldAlert {
+			log.Printf("⚠️  ALERT: %s", msg)
+			// TODO: 发送告警通知（Telegram/邮件等）
+		}
 		return
+	}
+
+	// 记录成功
+	s.metrics.RecordScanSuccess(listener.chain, startTime)
+
+	// 记录发现的转账
+	if len(transfers) > 0 {
+		log.Printf("[%s] Found %d transfers", listener.chain, len(transfers))
+		s.metrics.RecordTransfer(listener.chain, len(transfers))
 	}
 
 	// 处理转账
 	for _, transfer := range transfers {
 		s.processTransfer(transfer)
 	}
+
+	// 动态调整扫描间隔
+	s.adjustScanInterval(listener, len(transfers))
 }
 
 // scanTRX 扫描TRX原生代币交易
@@ -398,14 +442,7 @@ func (s *BlockchainService) scanTRX(listener *ChainListener, addresses map[strin
 	return transfers, nil
 }
 
-// hexToBase58 将Tron的hex地址转换为base58格式
-func hexToBase58(hexAddr string) string {
-	// 简化处理：直接返回原地址，实际使用中应该进行base58编码
-	// Tron地址以T开头（base58格式）或41开头（hex格式）
-	// 在这里我们假设配置的收款地址已经是base58格式
-	// TronGrid API返回的to_address通常已经是base58格式
-	return hexAddr
-}
+// hexToBase58 moved to blockchain_utils.go
 
 // scanTRC20 扫描TRC20交易
 func (s *BlockchainService) scanTRC20(listener *ChainListener, addresses map[string]bool) ([]Transfer, error) {
@@ -606,6 +643,13 @@ func (s *BlockchainService) getEVMBlockNumber(rpc string) (uint64, error) {
 
 // processTransfer 处理转账事件
 func (s *BlockchainService) processTransfer(transfer Transfer) {
+	// 检查交易是否已处理（防重复）
+	var existingLog model.TransactionLog
+	if err := model.GetDB().Where("tx_hash = ?", transfer.TxHash).First(&existingLog).Error; err == nil {
+		// 交易已存在，跳过处理
+		return
+	}
+
 	// 记录交易日志
 	txLog := model.TransactionLog{
 		Chain:       transfer.Chain,
@@ -625,18 +669,44 @@ func (s *BlockchainService) processTransfer(transfer Transfer) {
 	// 查找匹配的订单
 	order := s.matchOrder(transfer)
 	if order != nil {
-		// 更新订单状态
+		// 再次检查订单状态，防止并发重复处理
+		if order.Status != model.OrderStatusPending {
+			log.Printf("Order %s already processed, status: %d", order.TradeNo, order.Status)
+			return
+		}
+
+		// 更新订单状态（使用乐观锁）
 		now := time.Now()
+
+		// 实际支付金额也需要截断到标准精度（与unique_amount一致）
+		var actualAmount decimal.Decimal
+		if transfer.Chain == "wechat" || transfer.Chain == "alipay" {
+			actualAmount = transfer.Amount.Round(2) // 法币2位
+		} else {
+			actualAmount = transfer.Amount.Round(6) // 加密货币6位
+		}
+
 		updates := map[string]interface{}{
 			"status":        model.OrderStatusPaid,
 			"tx_hash":       transfer.TxHash,
 			"from_address":  transfer.From,
-			"actual_amount": transfer.Amount,
+			"actual_amount": actualAmount,
 			"paid_at":       &now,
 		}
 
-		if err := model.GetDB().Model(order).Updates(updates).Error; err != nil {
-			log.Printf("Failed to update order: %v", err)
+		// 使用 WHERE 条件确保只更新待支付的订单
+		result := model.GetDB().Model(order).
+			Where("status = ?", model.OrderStatusPending).
+			Updates(updates)
+
+		if result.Error != nil {
+			log.Printf("Failed to update order: %v", result.Error)
+			return
+		}
+
+		// 如果没有更新任何行，说明订单已被其他进程处理
+		if result.RowsAffected == 0 {
+			log.Printf("Order %s already processed by another process", order.TradeNo)
 			return
 		}
 
@@ -648,10 +718,13 @@ func (s *BlockchainService) processTransfer(transfer Transfer) {
 
 		log.Printf("Order %s matched with tx %s, amount: %s", order.TradeNo, transfer.TxHash, transfer.Amount)
 
-		// 增加商户余额
-		amount, _ := transfer.Amount.Float64()
+		// 记录订单匹配
+		s.metrics.RecordOrderMatch(transfer.Chain)
+
+		// 增加商户余额（使用 USD 结算金额）
+		settlementAmount, _ := order.SettlementAmount.Float64()
 		fee, _ := order.Fee.Float64()
-		if err := GetWithdrawService().AddMerchantBalance(order.MerchantID, amount, fee, order.FeeType); err != nil {
+		if err := GetWithdrawService().AddMerchantBalance(order.MerchantID, settlementAmount, fee, order.FeeType); err != nil {
 			log.Printf("Failed to add merchant balance for order %s: %v", order.TradeNo, err)
 		}
 
@@ -667,28 +740,37 @@ func (s *BlockchainService) processTransfer(transfer Transfer) {
 func (s *BlockchainService) matchOrder(transfer Transfer) *model.Order {
 	var order model.Order
 
-	// 精确匹配金额 (6位小数)
+	// 确定链的标准精度并截断金额
+	// TRC20/ERC20等: 6位小数
+	// BEP20: 虽然链上是18位，但我们统一按6位处理
+	// TRX: 6位小数
+	// 法币: 2位小数
+	var normalizedAmount decimal.Decimal
+	if transfer.Chain == "wechat" || transfer.Chain == "alipay" {
+		normalizedAmount = transfer.Amount.Round(2) // 法币2位
+	} else {
+		normalizedAmount = transfer.Amount.Round(6) // 加密货币6位
+	}
+
+	// 精确匹配唯一标识金额（无容差）
+	// 加密货币: 102.040023 USDT
+	// 法币: 100.01 CNY
 	err := model.GetDB().
-		Where("chain = ? AND to_address = ? AND usdt_amount = ? AND status = ?",
+		Where("chain = ? AND to_address = ? AND unique_amount = ? AND status = ?",
 			transfer.Chain,
 			strings.ToLower(transfer.To),
-			transfer.Amount,
+			normalizedAmount,
 			model.OrderStatusPending).
 		Order("created_at ASC").
 		First(&order).Error
 
 	if err != nil {
-		// 尝试模糊匹配 (允许0.01%误差)
-		tolerance := transfer.Amount.Mul(decimal.NewFromFloat(0.0001))
-		minAmount := transfer.Amount.Sub(tolerance)
-		maxAmount := transfer.Amount.Add(tolerance)
-
+		// 兼容旧订单：尝试匹配 usdt_amount (旧字段)
 		err = model.GetDB().
-			Where("chain = ? AND to_address = ? AND usdt_amount BETWEEN ? AND ? AND status = ?",
+			Where("chain = ? AND to_address = ? AND usdt_amount = ? AND status = ?",
 				transfer.Chain,
 				strings.ToLower(transfer.To),
-				minAmount,
-				maxAmount,
+				normalizedAmount,
 				model.OrderStatusPending).
 			Order("created_at ASC").
 			First(&order).Error
@@ -937,40 +1019,163 @@ func (s *BlockchainService) GetChainStatus() map[string]bool {
 }
 
 // parseTokenAmount 解析代币金额
-func parseTokenAmount(value string, decimals int) decimal.Decimal {
-	amount, ok := new(big.Int).SetString(value, 10)
-	if !ok {
-		return decimal.Zero
-	}
-
-	divisor := new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(decimals)), nil)
-	result := new(big.Float).Quo(new(big.Float).SetInt(amount), new(big.Float).SetInt(divisor))
-
-	f, _ := result.Float64()
-	return decimal.NewFromFloat(f).Round(int32(decimals))
-}
 
 // parseHexAmount 解析十六进制金额
-func parseHexAmount(hex string, decimals int) decimal.Decimal {
-	hex = strings.TrimPrefix(hex, "0x")
-	amount, ok := new(big.Int).SetString(hex, 16)
-	if !ok {
-		return decimal.Zero
-	}
-
-	divisor := new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(decimals)), nil)
-	result := new(big.Float).Quo(new(big.Float).SetInt(amount), new(big.Float).SetInt(divisor))
-
-	f, _ := result.Float64()
-	return decimal.NewFromFloat(f).Round(int32(decimals))
-}
 
 // parseHexUint64 解析十六进制数字
-func parseHexUint64(hex string) uint64 {
-	hex = strings.TrimPrefix(hex, "0x")
-	n, ok := new(big.Int).SetString(hex, 16)
-	if !ok {
-		return 0
+
+// adjustScanInterval 动态调整扫描间隔
+func (s *BlockchainService) adjustScanInterval(listener *ChainListener, transferCount int) {
+	listener.mu.Lock()
+	defer listener.mu.Unlock()
+
+	// 如果发现交易，减小扫描间隔
+	if transferCount > 0 {
+		listener.scanInterval = listener.baseScanInterval / 2
+		if listener.scanInterval < 5 {
+			listener.scanInterval = 5 // 最小 5 秒
+		}
+	} else {
+		// 没有交易，逐渐恢复到基础间隔
+		listener.scanInterval = listener.baseScanInterval
 	}
-	return n.Uint64()
+}
+
+// monitorGasPrices 监控 Gas 价格
+func (s *BlockchainService) monitorGasPrices() {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-s.ctx.Done():
+			return
+		case <-ticker.C:
+			s.updateGasPrices()
+		}
+	}
+}
+
+// updateGasPrices 更新 Gas 价格
+func (s *BlockchainService) updateGasPrices() {
+	evmChains := []string{"erc20", "bep20", "polygon", "optimism", "arbitrum", "avalanche", "base"}
+
+	for _, chain := range evmChains {
+		listener := s.listeners[chain]
+		if listener == nil || !listener.enabled {
+			continue
+		}
+
+		gasPrice, err := s.getGasPrice(chain, listener.rpc)
+		if err != nil {
+			log.Printf("[%s] Failed to get gas price: %v", chain, err)
+			continue
+		}
+
+		s.gasPriceMu.Lock()
+		s.gasPrices[chain] = gasPrice
+		s.gasPriceMu.Unlock()
+
+		log.Printf("[%s] Gas price updated: %.2f Gwei", chain, gasPrice)
+	}
+}
+
+// getGasPrice 获取 Gas 价格
+func (s *BlockchainService) getGasPrice(chain string, rpc string) (float64, error) {
+	rpcClient := s.rpcClients[chain]
+	if rpcClient == nil {
+		return 0, fmt.Errorf("RPC client not found for %s", chain)
+	}
+
+	params := map[string]interface{}{
+		"jsonrpc": "2.0",
+		"method":  "eth_gasPrice",
+		"params":  []interface{}{},
+		"id":      1,
+	}
+
+	body, err := rpcClient.PostJSON("", params)
+	if err != nil {
+		return 0, err
+	}
+
+	var result struct {
+		Result string `json:"result"`
+	}
+
+	if err := json.Unmarshal(body, &result); err != nil {
+		return 0, err
+	}
+
+	// 解析 hex 值并转换为 Gwei
+	value := new(big.Int)
+	value.SetString(strings.TrimPrefix(result.Result, "0x"), 16)
+
+	// 转换为 Gwei (1 Gwei = 10^9 Wei)
+	gwei := new(big.Float).SetInt(value)
+	gwei.Quo(gwei, big.NewFloat(1e9))
+
+	gweiFloat, _ := gwei.Float64()
+	return gweiFloat, nil
+}
+
+// GetGasPrice 获取 Gas 价格（公开方法）
+func (s *BlockchainService) GetGasPrice(chain string) float64 {
+	s.gasPriceMu.RLock()
+	defer s.gasPriceMu.RUnlock()
+	return s.gasPrices[chain]
+}
+
+// GetMetrics 获取监控指标
+func (s *BlockchainService) GetMetrics() map[string]interface{} {
+	if s.metrics == nil {
+		return nil
+	}
+	return s.metrics.GetMetrics()
+}
+
+// GetChainMetrics 获取指定链的监控指标
+func (s *BlockchainService) GetChainMetrics(chain string) map[string]interface{} {
+	if s.metrics == nil {
+		return nil
+	}
+	return s.metrics.GetChainMetrics(chain)
+}
+
+// detectReorg 检测区块重组
+func (s *BlockchainService) detectReorg(listener *ChainListener, currentBlock uint64) bool {
+	listener.mu.Lock()
+	defer listener.mu.Unlock()
+
+	// 如果没有历史记录，添加当前区块
+	if len(listener.blockHistory) == 0 {
+		listener.blockHistory = append(listener.blockHistory, currentBlock)
+		return false
+	}
+
+	lastBlock := listener.blockHistory[len(listener.blockHistory)-1]
+
+	// 如果当前区块小于或等于最后记录的区块，可能发生重组
+	if currentBlock <= lastBlock {
+		log.Printf("[%s] Potential reorg detected: current=%d, last=%d", 
+			listener.chain, currentBlock, lastBlock)
+		
+		// 清空历史，重新扫描
+		listener.blockHistory = []uint64{currentBlock}
+		listener.lastBlock = currentBlock - uint64(listener.reorgDepth)
+		if listener.lastBlock < 0 {
+			listener.lastBlock = 0
+		}
+		return true
+	}
+
+	// 添加到历史
+	listener.blockHistory = append(listener.blockHistory, currentBlock)
+
+	// 只保留最近的 20 个区块
+	if len(listener.blockHistory) > 20 {
+		listener.blockHistory = listener.blockHistory[len(listener.blockHistory)-20:]
+	}
+
+	return false
 }

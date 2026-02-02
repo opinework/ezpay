@@ -40,7 +40,7 @@ storage:
   # 数据存储目录 (上传文件、APK等)
   # Linux 默认: /var/lib/ezpay
   # Windows/macOS 默认: 可执行文件目录/ezpay_data
-  data_dir: ""             # 留空则使用默认值
+  data_dir: "/var/lib/ezpay"  # 数据存储目录
 
 # ============================================================================
 # 安全配置
@@ -91,15 +91,14 @@ log:
 # 汇率配置
 # ============================================================================
 rate:
-  # 汇率模式
-  # - auto: 自动获取实时汇率
-  # - manual: 使用手动设置的汇率
-  # - hybrid: 优先自动，失败时使用手动汇率
-  mode: "hybrid"
-  manual_rate: 7.2         # 手动汇率 (CNY/USDT)
-  float_percent: 0         # 汇率浮动百分比 (如 0.5 表示浮动0.5%)
-  cache_seconds: 300       # 汇率缓存时间(秒)
-  source: "binance"        # 汇率来源: binance, okx
+  # 注意: 汇率数据、买入卖出浮动等都存储在数据库中，可在管理后台配置
+  auto_update_enabled: true  # 是否启用汇率自动更新
+  update_interval: 60        # 自动更新间隔(分钟)
+  source: "binance"          # 主数据源: binance, okx, custom
+  fallback_source: "okx"     # 备用数据源（主数据源失败时使用）
+  custom_api: ""             # 自定义API地址（仅当 source=custom 时使用）
+  cny_api: "https://api.exchangerate-api.com/v4/latest/USD"  # CNY汇率专用API
+  cache_seconds: 300         # 汇率缓存时间(秒)
 
 # ============================================================================
 # 区块链监控配置

@@ -124,6 +124,7 @@ func registerRoutes(r *gin.Engine, cfg *config.Config) {
 	merchantHandler := handler.NewMerchantHandler(cfg)
 	cashierHandler := handler.NewCashierHandler()
 	channelHandler := handler.NewChannelHandler()
+	rateHandler := handler.NewRateHandler()
 
 	// ============ 彩虹易支付兼容接口 ============
 	// 应用API日志中间件和IP黑名单检查到支付API
@@ -203,6 +204,13 @@ func registerRoutes(r *gin.Engine, cfg *config.Config) {
 		adminAPI.PUT("/wallets/:id", adminHandler.UpdateWallet)
 		adminAPI.DELETE("/wallets/:id", adminHandler.DeleteWallet)
 		adminAPI.POST("/upload/qrcode", adminHandler.UploadQRCode)
+
+		// 汇率管理
+		adminAPI.GET("/exchange-rates", rateHandler.ListExchangeRates)
+		adminAPI.PUT("/exchange-rates/:id", rateHandler.UpdateExchangeRate)
+		adminAPI.POST("/exchange-rates/refresh", rateHandler.RefreshAutoRates)
+		adminAPI.GET("/exchange-rates/float", rateHandler.GetFloatSettings)
+		adminAPI.POST("/exchange-rates/float", rateHandler.UpdateFloatSettings)
 
 		// 系统配置
 		adminAPI.GET("/configs", adminHandler.GetConfigs)
@@ -416,6 +424,15 @@ func startBackgroundServices(cfg *config.Config) {
 
 	// 启动通知重试
 	service.GetNotifyService().StartNotifyWorker()
+
+	// 启动汇率自动更新（根据配置决定是否启用）
+	if cfg.Rate.AutoUpdateEnabled {
+		rateUpdater := service.NewRateUpdater()
+		rateUpdater.Start()
+		log.Printf("汇率自动更新已启用，更新间隔: %d 分钟", cfg.Rate.UpdateInterval)
+	} else {
+		log.Println("汇率自动更新已禁用")
+	}
 
 	// 启动每日报告
 	service.GetBotService().StartDailyReportWorker()

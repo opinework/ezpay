@@ -291,10 +291,11 @@ func (s *TelegramService) handleBind(chatID int64, args []string, user *Telegram
 		return
 	}
 
-	// 更新商户的Telegram Chat ID
+	// 更新商户的Telegram Chat ID和状态
 	if err := model.GetDB().Model(&merchant).Updates(map[string]interface{}{
 		"telegram_chat_id": chatID,
 		"telegram_notify":  true,
+		"telegram_status":  "normal",
 	}).Error; err != nil {
 		s.SendMessage(chatID, "❌ 绑定失败，请稍后重试")
 		return
@@ -331,6 +332,7 @@ func (s *TelegramService) handleUnbind(chatID int64, user *TelegramUser) {
 	if err := model.GetDB().Model(&merchant).Updates(map[string]interface{}{
 		"telegram_chat_id": 0,
 		"telegram_notify":  false,
+		"telegram_status":  "unbound",
 	}).Error; err != nil {
 		s.SendMessage(chatID, "❌ 解绑失败，请稍后重试")
 		return
@@ -453,6 +455,23 @@ func (s *TelegramService) SendMessageMarkdown(chatID int64, text string) error {
 	}
 	defer resp.Body.Close()
 
+	// 检查响应状态
+	if resp.StatusCode != 200 {
+		respBody, _ := io.ReadAll(resp.Body)
+		var result struct {
+			OK          bool   `json:"ok"`
+			ErrorCode   int    `json:"error_code"`
+			Description string `json:"description"`
+		}
+		json.Unmarshal(respBody, &result)
+
+		// 如果是用户封禁或聊天不存在，返回特殊错误
+		if result.ErrorCode == 403 || result.ErrorCode == 400 {
+			return fmt.Errorf("telegram_blocked: %s", result.Description)
+		}
+		return fmt.Errorf("telegram error %d: %s", result.ErrorCode, result.Description)
+	}
+
 	return nil
 }
 
@@ -463,11 +482,23 @@ func (s *TelegramService) SendToMerchant(merchantID uint, text string) error {
 		return err
 	}
 
-	if !merchant.TelegramNotify || merchant.TelegramChatID == 0 {
+	// 检查是否启用通知、是否绑定、状态是否正常
+	if !merchant.TelegramNotify || merchant.TelegramChatID == 0 || merchant.TelegramStatus == "blocked" || merchant.TelegramStatus == "unbound" {
 		return nil
 	}
 
-	return s.SendMessageMarkdown(merchant.TelegramChatID, text)
+	err := s.SendMessageMarkdown(merchant.TelegramChatID, text)
+
+	// 如果是用户封禁或账号问题，自动标记为 blocked
+	if err != nil && (strings.Contains(err.Error(), "telegram_blocked") || strings.Contains(err.Error(), "chat not found")) {
+		model.GetDB().Model(&merchant).Updates(map[string]interface{}{
+			"telegram_notify": false,
+			"telegram_status": "blocked",
+		})
+		log.Printf("Telegram账号已标记为封禁: 商户 %s (ID: %d), 原因: %v", merchant.PID, merchantID, err)
+	}
+
+	return err
 }
 
 // ============ 订单相关通知 ============

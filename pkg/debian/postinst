@@ -11,6 +11,10 @@ case "$1" in
             useradd -r -g ezpay -d /var/lib/ezpay -s /usr/sbin/nologin -c "EzPay Payment Gateway" ezpay
         fi
 
+        # Create data directories
+        mkdir -p /var/lib/ezpay/uploads
+        mkdir -p /var/lib/ezpay/qrcode
+
         # Set ownership
         chown -R ezpay:ezpay /var/lib/ezpay
         chown -R ezpay:ezpay /var/log/ezpay
@@ -26,10 +30,13 @@ case "$1" in
         echo "============================================"
         echo "EzPay installed successfully!"
         echo ""
-        echo "Please edit /etc/ezpay/config.yaml before starting"
+        echo "Next steps:"
+        echo "  1. Edit config:    /etc/ezpay/config.yaml"
+        echo "  2. Init database:  /usr/share/ezpay/db/migrate.sh migrate"
+        echo "  3. Start service:  systemctl start ezpay"
+        echo "  4. Enable on boot: systemctl enable ezpay"
         echo ""
-        echo "To start:  systemctl start ezpay"
-        echo "To enable: systemctl enable ezpay"
+        echo "Database scripts: /usr/share/ezpay/db/"
         echo "============================================"
         ;;
 

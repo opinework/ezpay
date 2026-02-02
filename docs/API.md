@@ -17,7 +17,7 @@
 | return_url | 否 | 同步返回地址 |
 | name | 是 | 商品名称 |
 | money | 是 | 金额 |
-| currency | 否 | 货币类型: CNY, USD, USDT, EUR (默认 CNY) |
+| currency | 否 | 货币类型: USD, EUR, CNY (默认 USD) |
 | param | 否 | 附加参数 (原样返回) |
 | sign | 是 | 签名 |
 | sign_type | 是 | 签名类型: MD5 |
@@ -25,9 +25,12 @@
 **签名算法**:
 
 1. 将参数按键名 ASCII 码从小到大排序
-2. 拼接为 `key1=value1&key2=value2` 格式 (空值和 sign、sign_type 不参与)
-3. 在末尾追加商户密钥: `key1=value1&key2=value2密钥`
-4. MD5 加密 (小写)
+2. 对参数值进行 **RFC 3986 URL 编码** (空格编码为 `%20`，而不是 `+`)
+3. 拼接为 `key1=urlencode(value1)&key2=urlencode(value2)` 格式 (空值和 sign、sign_type 不参与)
+4. 在末尾追加商户密钥: `key1=urlencode(value1)&key2=urlencode(value2)密钥`
+5. MD5 加密 (小写)
+
+**重要**: 参数值使用 RFC 3986 标准进行 URL 编码，空格必须编码为 `%20`（不是 `+`）
 
 **PHP示例**:
 ```php
@@ -40,17 +43,18 @@ $params = [
     'return_url' => 'https://yoursite.com/return.php',
     'name' => '商品名称',
     'money' => '100.00',
-    'currency' => 'USD',  // 可选: CNY, USD, USDT, EUR
+    'currency' => 'USD',  // 可选: USD, EUR, CNY (默认 USD)
 ];
 
 // 排序
 ksort($params);
 
-// 拼接
+// 拼接 (使用 RFC 3986 URL 编码)
 $str = '';
 foreach ($params as $k => $v) {
     if ($v !== '' && $k !== 'sign' && $k !== 'sign_type') {
-        $str .= $k . '=' . $v . '&';
+        // RFC 3986 编码: 空格编码为 %20
+        $str .= $k . '=' . rawurlencode($v) . '&';
     }
 }
 $str = rtrim($str, '&');
@@ -64,6 +68,8 @@ $params['sign_type'] = 'MD5';
 // 跳转支付
 header('Location: https://pay.yoursite.com/submit.php?' . http_build_query($params));
 ```
+
+**注意**: PHP 中使用 `rawurlencode()` 进行 RFC 3986 编码（空格→%20），而不是 `urlencode()`（空格→+）
 
 **响应**: 跳转到收银台页面
 
@@ -123,11 +129,16 @@ header('Location: https://pay.yoursite.com/submit.php?' . http_build_query($para
 | out_trade_no | 商户订单号 |
 | type | 支付方式 |
 | name | 商品名称 |
-| money | 金额 |
+| money | **原始金额** (与发起支付时一致) |
 | trade_status | 交易状态: TRADE_SUCCESS |
 | param | 附加参数 |
 | sign | 签名 |
 | sign_type | 签名类型 |
+
+**重要说明**:
+- `money` 返回的是**发起支付时的原始金额**，而非实际支付的 USDT/TRX 金额
+- 这保证了商户验签时金额一致，无需关心内部货币转换
+- 签名算法与发起支付相同，使用 RFC 3986 URL 编码
 
 **响应要求**: 收到通知后返回字符串 `success`
 
@@ -308,55 +319,87 @@ header('Location: https://pay.yoursite.com/submit.php?' . http_build_query($para
 
 ---
 
-## 多币种支持
+## 多币种支持与 USD 结算体系
 
-系统支持多种货币作为订单金额输入，会根据支付方式自动转换为对应的支付货币。
+系统采用 **USD 作为内部统一结算货币**，支持多币种商品标价，通过买入/卖出汇率体系实现汇差利润。
 
 ### 支持的货币类型
 
 | currency | 说明 |
 |----------|------|
-| CNY | 人民币 (默认) |
-| USD | 美元 |
-| USDT | 泰达币 |
+| USD | 美元 **(默认)** |
 | EUR | 欧元 |
+| CNY | 人民币 |
+
+⚠️ **注意**: 不再支持 USDT 作为商品标价货币，USDT 仅作为支付币种使用。
+
+### 货币转换流程
+
+系统采用**两次汇率转换**机制：
+
+#### 1. 商品价格 → USD 结算金额（使用买入汇率）
+- 商品标价（EUR/CNY/USD）→ 买入汇率转换 → **USD 结算金额**
+- 买入汇率 = 基础汇率 × (1 + 买入浮动%)
+- USD 结算金额计入商户余额
+
+#### 2. USD 结算金额 → 支付金额（使用买入浮动）
+- USD 结算金额 → 买入浮动转换 → **实际支付金额**（USDT/TRX/CNY）
+- 让用户多付，平台获得汇差利润
 
 ### 货币转换规则
 
-| 原始货币 | 支付方式 | 支付货币 | 转换说明 |
-|---------|---------|---------|---------|
-| USD/USDT | usdt_* | USDT | 1:1 直接转换 |
-| CNY | usdt_* | USDT | CNY ÷ USDT汇率 |
-| EUR | usdt_* | USDT | EUR → USD → USDT |
-| USD/USDT | trx | TRX | USD ÷ TRX价格 |
-| CNY | trx | TRX | CNY ÷ TRX/CNY汇率 |
-| USD/USDT | wechat/alipay | CNY | USD × USD/CNY汇率 |
-| CNY | wechat/alipay | CNY | 1:1 直接使用 |
+| 原始货币 | 支付方式 | 中间步骤 | 支付货币 | 说明 |
+|---------|---------|---------|---------|------|
+| USD | usdt_* | USD (无转换) | USDT | USD ÷ (1-买入浮动%) |
+| EUR | usdt_* | EUR → USD | USDT | EUR×买入汇率 → USD ÷ (1-买入浮动%) |
+| CNY | usdt_* | CNY → USD | USDT | CNY÷买入汇率 → USD ÷ (1-买入浮动%) |
+| USD | trx | USD (无转换) | TRX | USD ÷ (TRX价格 × (1-买入浮动%)) |
+| USD | wechat/alipay | USD (无转换) | CNY | USD × 买入汇率 |
+| EUR | wechat/alipay | EUR → USD | CNY | EUR×买入汇率 → USD×买入汇率 |
+| CNY | wechat/alipay | CNY → USD | CNY | CNY÷买入汇率 → USD×买入汇率 |
+
+### 汇率配置说明
+
+- **买入汇率浮动** (`rate_buy_float`): 用户支付时平台多收（如 +2%）
+- **卖出汇率浮动** (`rate_sell_float`): 商户提现时平台少给（如 -2%）
+- **汇差利润**: 买入浮动 + 卖出浮动（如 2% + 2% = 4%）
 
 ### 使用示例
 
-**示例1**: 使用 USD 支付 USDT
+**示例1**: 使用 USD 支付 USDT（买入浮动 2%）
 ```bash
 # 请求: money=100, currency=USD, type=usdt_trc20
-# 响应: pay_amount=100 USDT (因为 USD ≈ USDT)
+# 流程:
+#   1. USD→USD: 100 USD (结算金额，计入商户余额)
+#   2. USD→USDT: 100 ÷ (1-0.02) = 102.04 USDT
+# 响应: settlement_amount=100 USD, pay_amount=102.04 USDT
+# 说明: 用户支付 102.04 USDT，商户得到 100 USD 余额，平台赚取 2.04 USDT
 ```
 
-**示例2**: 使用 CNY 支付 USDT
+**示例2**: 使用 EUR 支付 USDT（买入汇率 1.08，买入浮动 2%）
+```bash
+# 请求: money=100, currency=EUR, type=usdt_trc20
+# 流程:
+#   1. EUR→USD: 100 × 1.08 × (1+0.02) = 110.16 USD (结算金额)
+#   2. USD→USDT: 110.16 ÷ (1-0.02) = 112.41 USDT
+# 响应: settlement_amount=110.16 USD, pay_amount=112.41 USDT
+# 说明: 用户支付 112.41 USDT，商户得到 110.16 USD 余额
+```
+
+**示例3**: 使用 CNY 支付 USDT（买入汇率 7.2，买入浮动 2%）
 ```bash
 # 请求: money=720, currency=CNY, type=usdt_trc20
-# 响应: pay_amount≈100 USDT (按汇率 7.2 转换)
+# 流程:
+#   1. CNY→USD: 720 ÷ (7.2×(1+0.02)) = 98.04 USD (结算金额)
+#   2. USD→USDT: 98.04 ÷ (1-0.02) = 100.04 USDT
+# 响应: settlement_amount=98.04 USD, pay_amount=100.04 USDT
 ```
 
-**示例3**: 使用 USD 支付微信
-```bash
-# 请求: money=100, currency=USD, type=wechat
-# 响应: pay_amount=720 CNY (按汇率 7.2 转换)
-```
-
-**示例4**: 不传 currency (默认 CNY)
+**示例4**: 不传 currency (默认 USD)
 ```bash
 # 请求: money=100, type=usdt_trc20
-# 响应: pay_amount≈13.89 USDT (100 CNY ÷ 7.2)
+# 流程: 100 USD ÷ (1-0.02) = 102.04 USDT
+# 响应: settlement_amount=100 USD, pay_amount=102.04 USDT
 ```
 
 ### 汇率来源
@@ -364,6 +407,30 @@ header('Location: https://pay.yoursite.com/submit.php?' . http_build_query($para
 - **USDT/CNY**: 从 Binance/OKX 自动获取，支持手动设置
 - **TRX/USDT**: 从 Binance 实时获取
 - **EUR/USD**: 固定汇率 1.08 (可配置)
+
+### 订单处理流程
+
+```
+商户发起支付                    EzPay 内部处理                    支付确认与通知
+┌─────────────────┐      ┌─────────────────────────┐      ┌─────────────────────┐
+│ currency: USD   │      │ 1. 保存原始货币和金额:   │      │ 1. 监听区块链交易     │
+│ money: 25.00    │ ──▶  │    Currency=USD         │ ──▶  │ 2. 匹配 pay_amount   │
+│ type: usdt_trc20│      │    Money=25.00          │      │ 3. 记录 actual_amount│
+└─────────────────┘      │                         │      └──────────┬──────────┘
+                         │ 2. 转换为支付货币:       │                 │
+                         │    PayCurrency=USDT     │                 ▼
+                         │    PayAmount=25.000001  │      ┌─────────────────────┐
+                         │    Rate=1.0000          │      │ 发送通知 (原始金额): │
+                         └─────────────────────────┘      │ money=25.00         │
+                                                          │ (保证验签一致)       │
+                                                          └─────────────────────┘
+```
+
+**关键点**:
+1. 商户发起时传入原始货币和金额
+2. EzPay 内部转换为支付货币（USDT/TRX/CNY）
+3. 区块链确认时按 `pay_amount` 匹配
+4. 通知商户时返回**原始金额**，保证验签一致
 
 ---
 
@@ -473,7 +540,7 @@ fetch('/api/payment-types?pid=10001')
 |------|------|------|
 | type | 是 | 支付类型 (如 usdt_trc20) |
 | money | 是 | 金额 |
-| currency | 否 | 货币类型: CNY, USD, USDT, EUR (默认 CNY) |
+| currency | 否 | 货币类型: USD, EUR, CNY (默认 USD) |
 | name | 否 | 商品名称 (默认: 测试订单) |
 
 **请求示例**:
@@ -597,6 +664,48 @@ fetch('/api/payment-types?pid=10001')
 | 商户余额不足以支付手续费 | 使用个人钱包模式时余额不足 |
 | 订单不存在 | trade_no/out_trade_no错误 |
 | 订单已过期 | 订单超时未支付 |
+
+---
+
+## 后台统计说明
+
+### 统计货币
+
+管理后台和商户后台的所有统计金额**统一使用 USD**（美元）显示。
+
+由于 USDT ≈ USD (1:1)，系统使用订单的 `actual_amount`（实际收到的 USDT 金额）作为 USD 统计值。
+
+### 统计 API 响应
+
+Dashboard API 响应中包含 `currency: "USD"` 字段表示统计货币：
+
+```json
+{
+    "code": 1,
+    "currency": "USD",
+    "data": {
+        "today": {
+            "orders": 10,
+            "amount": 250.50
+        },
+        "total": {
+            "orders": 100,
+            "amount": 5000.00
+        }
+    }
+}
+```
+
+### 订单金额字段说明
+
+| 字段 | 说明 |
+|------|------|
+| currency | 原始货币类型 (CNY/USD/USDT/EUR) |
+| money | 原始金额 |
+| pay_currency | 实际支付货币 (USDT/TRX/CNY) |
+| pay_amount | 需支付金额 (支付货币) |
+| actual_amount | 实际收到金额 (USDT ≈ USD) |
+| rate | 使用的汇率 |
 
 ---
 

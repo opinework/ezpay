@@ -52,8 +52,9 @@ type CreateOrderResponse struct {
 	Currency       string `json:"currency,omitempty"`         // 原始货币
 	Money          string `json:"money,omitempty"`            // 原始金额
 	PayCurrency    string `json:"pay_currency,omitempty"`     // 支付货币
-	PayAmount      string `json:"pay_amount,omitempty"`       // 支付金额
-	USDTAmount     string `json:"usdt_amount,omitempty"`      // USDT金额(兼容)
+	PayAmount      string `json:"pay_amount,omitempty"`       // 用户应支付金额（展示用，无偏移）
+	UniqueAmount   string `json:"unique_amount,omitempty"`    // 订单标识金额（含偏移，实际支付）
+	USDTAmount     string `json:"usdt_amount,omitempty"`      // USDT金额(兼容旧字段，等于 unique_amount)
 	Rate           string `json:"rate,omitempty"`
 	Address        string `json:"address,omitempty"`
 	Chain          string `json:"chain,omitempty"`
@@ -78,10 +79,10 @@ func (s *OrderService) CreateOrder(req *CreateOrderRequest) (*CreateOrderRespons
 		return nil, errors.New("金额无效")
 	}
 
-	// 标准化货币类型（默认 CNY）
+	// 标准化货币类型（默认 USD）
 	currency := NormalizeCurrency(req.Currency)
 	if currency == "" {
-		currency = "CNY"
+		currency = "USD"
 	}
 
 	// 标准化支付类型
@@ -116,50 +117,113 @@ func (s *OrderService) CreateOrder(req *CreateOrderRequest) (*CreateOrderRespons
 
 	// 使用新的货币转换服务
 	rateService := GetRateService()
-	var payAmount, rate decimal.Decimal
+	var payAmount, settlementAmount decimal.Decimal
 	var payCurrency string
 
+	// 1. 计算结算金额（USD）- 使用买入汇率，计入商户余额
+	settlementResult, err := rateService.ConvertToSettlementCurrency(currency, money)
+	if err != nil {
+		return nil, errors.New("结算金额计算失败: " + err.Error())
+	}
+	settlementAmount = settlementResult.Amount
+	// rate := settlementResult.Rate // 原始货币 -> USD 的买入汇率（已不需要）
+
+	// 2. 计算支付金额 - 基于 USD 结算金额，使用买入汇率转换为实际收款币种
+	// 确定目标支付货币
 	if isFiat {
-		// 法币收款(微信/支付宝)：转换为 CNY
-		convertResult, err := rateService.ConvertToPayCurrency(currency, money, chain)
-		if err != nil {
-			return nil, errors.New("汇率获取失败: " + err.Error())
-		}
-		payAmount = convertResult.Amount
-		rate = convertResult.Rate
-		payCurrency = convertResult.PayCurrency
+		payCurrency = "CNY" // 法币收款
 	} else {
-		// 加密货币收款：转换为对应货币(USDT/TRX)
-		convertResult, err := rateService.ConvertToPayCurrency(currency, money, chain)
-		if err != nil {
-			return nil, errors.New("汇率获取失败: " + err.Error())
+		// 加密货币收款：根据链确定币种
+		switch chain {
+		case "trx":
+			payCurrency = "TRX"
+		default:
+			payCurrency = "USDT" // trc20, erc20, bep20, polygon, optimism, arbitrum, avalanche, base
 		}
-		payAmount = convertResult.Amount
-		rate = convertResult.Rate
-		payCurrency = convertResult.PayCurrency
+	}
+
+	// 从 USD 转换为支付货币（使用买入浮动，让用户多付）
+	if payCurrency == "USD" {
+		payAmount = settlementAmount
+	} else {
+		// 获取买入浮动
+		buyFloatStr := rateService.GetConfigValue(model.ConfigKeyRateBuyFloat, "0")
+		buyFloat, _ := decimal.NewFromString(buyFloatStr)
+
+		if payCurrency == "USDT" {
+			// USD -> USDT: 基础汇率 1:1
+			// 应用买入浮动：让用户多付
+			// 公式: payAmount = settlementAmount / (1 - buyFloat)
+			// 例如: 110.16 USD / (1 - 0.02) = 110.16 / 0.98 = 112.41 USDT
+			if buyFloat.IsZero() {
+				payAmount = settlementAmount.Round(6)
+			} else {
+				divisor := decimal.NewFromInt(1).Sub(buyFloat)
+				payAmount = settlementAmount.Div(divisor).Round(6)
+			}
+		} else if payCurrency == "TRX" {
+			// USD -> TRX: 获取 TRX/USD 价格
+			trxUsdRate, err := rateService.GetTRXUSDRate()
+			if err != nil {
+				return nil, errors.New("TRX汇率获取失败: " + err.Error())
+			}
+			// 应用买入浮动：让用户多付 TRX
+			// 公式: payAmount = settlementAmount / (trxUsdRate * (1 - buyFloat))
+			var adjustedRate decimal.Decimal
+			if buyFloat.IsZero() {
+				adjustedRate = trxUsdRate
+			} else {
+				adjustedRate = trxUsdRate.Mul(decimal.NewFromInt(1).Sub(buyFloat))
+			}
+			payAmount = settlementAmount.Div(adjustedRate).Round(6)
+		} else if payCurrency == "CNY" {
+			// USD -> CNY: 获取基础汇率
+			cnyUsdRate, err := rateService.GetRateWithType(RateTypeBuy, "USD", "CNY")
+			if err != nil {
+				return nil, errors.New("CNY汇率获取失败: " + err.Error())
+			}
+			// CNY 汇率已经包含了买入浮动（在 GetRateWithType 中处理）
+			payAmount = settlementAmount.Mul(cnyUsdRate).Round(2)
+		}
+	}
+
+	// 计算显示汇率（用于收银台显示）
+	// 显示格式: 1 {支付货币} ≈ {产品货币符号}X
+	// 例如：1 USDT ≈ $1（USD产品）、1 TRX ≈ €0.84（EUR产品）
+	var displayRate decimal.Decimal
+	if payCurrency == currency {
+		// 支付货币与产品货币相同，汇率为1
+		displayRate = decimal.NewFromInt(1)
+	} else if !payAmount.IsZero() {
+		// 计算：1单位支付货币 = 多少产品货币
+		// displayRate = money / payAmount
+		displayRate = money.Div(payAmount)
+	} else {
+		displayRate = decimal.NewFromInt(1)
 	}
 
 	// 创建订单
 	order := model.Order{
-		TradeNo:     util.GenerateTradeNo(),
-		OutTradeNo:  req.OutTradeNo,
-		MerchantID:  merchant.ID,
-		Type:        payType,
-		Name:        req.Name,
-		Currency:    currency,
-		Money:       money,
-		PayAmount:   payAmount,
-		PayCurrency: payCurrency,
-		USDTAmount:  payAmount, // 兼容旧字段
-		Rate:        rate,
-		Chain:       chain,
-		Status:      model.OrderStatusPending,
-		NotifyURL:   req.NotifyURL,
-		ReturnURL:   req.ReturnURL,
-		Param:       req.Param,
-		ClientIP:    req.ClientIP,
-		ExpiredAt:   expiredAt,
-		Channel:     channel,
+		TradeNo:          util.GenerateTradeNo(),
+		OutTradeNo:       req.OutTradeNo,
+		MerchantID:       merchant.ID,
+		Type:             payType,
+		Name:             req.Name,
+		Currency:         currency,
+		Money:            money,
+		PayAmount:        payAmount,
+		PayCurrency:      payCurrency,
+		USDTAmount:       payAmount,        // 兼容旧字段
+		SettlementAmount: settlementAmount, // 结算金额（USD），用于计入商户余额
+		Rate:             displayRate,      // 显示汇率（支付货币 -> CNY）
+		Chain:            chain,
+		Status:           model.OrderStatusPending,
+		NotifyURL:        req.NotifyURL,
+		ReturnURL:        req.ReturnURL,
+		Param:            req.Param,
+		ClientIP:         req.ClientIP,
+		ExpiredAt:        expiredAt,
+		Channel:          channel,
 	}
 
 	// 根据通道类型处理
@@ -179,16 +243,24 @@ func (s *OrderService) CreateOrder(req *CreateOrderRequest) (*CreateOrderRespons
 			order.ToAddress = wallet.Address // 微信/支付宝账号
 			order.QRCode = wallet.QRCode     // 收款二维码
 		} else {
-			// 加密货币收款：生成唯一金额
+			// 加密货币收款：生成唯一标识金额
 			// TRC20地址保持原始大小写(Base58编码)，ERC20/BEP20转小写
 			if chain == "trc20" || chain == "trx" {
 				order.ToAddress = wallet.Address
 			} else {
 				order.ToAddress = strings.ToLower(wallet.Address)
 			}
+			// 生成唯一标识金额（含偏移）
 			uniqueAmount := rateService.GenerateUniqueAmount(payAmount, chain)
-			order.PayAmount = uniqueAmount
-			order.USDTAmount = uniqueAmount // 兼容旧字段
+			order.PayAmount = payAmount       // 展示金额（无偏移，如 102.04）
+			order.UniqueAmount = uniqueAmount // 标识金额（含偏移，如 102.040023）
+			order.USDTAmount = uniqueAmount   // 兼容旧字段
+		}
+
+		// 法币收款也需要设置 UniqueAmount
+		if isFiat {
+			uniqueAmount := rateService.GenerateUniqueAmount(payAmount, chain)
+			order.UniqueAmount = uniqueAmount // 标识金额（含偏移，如 100.01）
 		}
 
 		// 记录使用的钱包
@@ -207,8 +279,9 @@ func (s *OrderService) CreateOrder(req *CreateOrderRequest) (*CreateOrderRespons
 		}
 		order.FeeRate = feeRate
 
-		// 计算手续费 (基于订单金额)
-		fee := money.Mul(feeRate)
+		// 计算手续费 (基于 USD 结算金额)
+		// 例如：110.16 USD × 1% = 1.10 USD
+		fee := settlementAmount.Mul(feeRate)
 		order.Fee = fee
 
 		// 商户钱包模式需要预扣手续费
@@ -253,9 +326,11 @@ func (s *OrderService) CreateOrder(req *CreateOrderRequest) (*CreateOrderRespons
 			} else {
 				order.ToAddress = strings.ToLower(wallet.Address)
 			}
+			// 生成唯一标识金额
 			uniqueAmount := rateService.GenerateUniqueAmount(payAmount, chain)
-			order.PayAmount = uniqueAmount
-			order.USDTAmount = uniqueAmount
+			order.PayAmount = payAmount       // 展示金额
+			order.UniqueAmount = uniqueAmount // 标识金额
+			order.USDTAmount = uniqueAmount   // 兼容旧字段
 			model.GetDB().Save(&order)
 		}
 	}
@@ -326,10 +401,13 @@ func (s *OrderService) createUpstreamOrder(order *model.Order, channel string) e
 	// 更新订单
 	order.ChannelOrderID = result.OrderID
 	order.ChannelPayURL = result.PayURL
-	order.USDTAmount = result.Amount
+	order.PayAmount = result.Amount      // 设置展示金额
+	order.UniqueAmount = result.Amount   // 设置标识金额（上游通道不需要偏移）
+	order.USDTAmount = result.Amount     // 兼容旧字段
 	if !result.ExpireTime.IsZero() {
 		order.ExpiredAt = result.ExpireTime
 	}
+	// 注意：SettlementAmount 已经在订单创建时设置（第202行），这里无需修改
 
 	return model.GetDB().Save(order).Error
 }
@@ -350,21 +428,22 @@ func (s *OrderService) buildOrderResponse(order *model.Order, merchant *model.Me
 	}
 
 	resp := &CreateOrderResponse{
-		Code:        1,
-		Msg:         "success",
-		TradeNo:     order.TradeNo,
-		OutTradeNo:  order.OutTradeNo,
-		Type:        order.Type,
-		Currency:    order.Currency,
-		Money:       order.Money.String(),
-		PayCurrency: order.PayCurrency,
-		PayAmount:   order.PayAmount.String(),
-		USDTAmount:  order.USDTAmount.String(), // 兼容旧字段
-		Rate:        order.Rate.String(),
-		Address:     order.ToAddress,
-		Chain:       order.Chain,
-		QRCode:      qrcode,
-		ExpiredAt:   order.ExpiredAt.Format("2006-01-02 15:04:05"),
+		Code:         1,
+		Msg:          "success",
+		TradeNo:      order.TradeNo,
+		OutTradeNo:   order.OutTradeNo,
+		Type:         order.Type,
+		Currency:     order.Currency,
+		Money:        order.Money.String(),
+		PayCurrency:  order.PayCurrency,
+		PayAmount:    order.PayAmount.String(),   // 展示金额（如 102.04）
+		UniqueAmount: order.UniqueAmount.String(), // 标识金额（如 102.040023）
+		USDTAmount:   order.UniqueAmount.String(), // 兼容旧字段，等于 unique_amount
+		Rate:         order.Rate.String(),
+		Address:      order.ToAddress,
+		Chain:        order.Chain,
+		QRCode:       qrcode,
+		ExpiredAt:    order.ExpiredAt.Format("2006-01-02 15:04:05"),
 		Channel:     order.Channel,
 	}
 
@@ -471,7 +550,7 @@ func (s *OrderService) QueryOrdersWithMerchant(query *model.OrderQuery) ([]model
 	return s.QueryOrders(query)
 }
 
-// GetOrderStats 获取订单统计
+// GetOrderStats 获取订单统计 (金额统一使用 USD，USDT ≈ USD)
 func (s *OrderService) GetOrderStats(merchantID uint) (*model.OrderStats, error) {
 	stats := &model.OrderStats{}
 	db := model.GetDB().Model(&model.Order{})
@@ -483,17 +562,33 @@ func (s *OrderService) GetOrderStats(merchantID uint) (*model.OrderStats, error)
 	// 总订单数
 	db.Count(&stats.TotalOrders)
 
-	// 总金额
-	var totalMoney, totalUSDT float64
-	db.Where("status = ?", model.OrderStatusPaid).Select("COALESCE(SUM(money), 0)").Scan(&totalMoney)
-	db.Where("status = ?", model.OrderStatusPaid).Select("COALESCE(SUM(actual_amount), 0)").Scan(&totalUSDT)
-	stats.TotalAmount = decimal.NewFromFloat(totalMoney)
-	stats.TotalUSDT = decimal.NewFromFloat(totalUSDT)
+	// 总金额 (使用 settlement_amount 统一 USD 结算)
+	var totalUSD float64
+	dbPaid := model.GetDB().Model(&model.Order{})
+	if merchantID > 0 {
+		dbPaid = dbPaid.Where("merchant_id = ?", merchantID)
+	}
+	dbPaid.Where("status = ?", model.OrderStatusPaid).Select("COALESCE(SUM(settlement_amount), 0)").Scan(&totalUSD)
+	stats.TotalUSD = decimal.NewFromFloat(totalUSD)
 
 	// 各状态订单数
-	db.Where("status = ?", model.OrderStatusPending).Count(&stats.PendingOrders)
-	db.Where("status = ?", model.OrderStatusPaid).Count(&stats.PaidOrders)
-	db.Where("status = ?", model.OrderStatusExpired).Count(&stats.ExpiredOrders)
+	dbPending := model.GetDB().Model(&model.Order{})
+	if merchantID > 0 {
+		dbPending = dbPending.Where("merchant_id = ?", merchantID)
+	}
+	dbPending.Where("status = ?", model.OrderStatusPending).Count(&stats.PendingOrders)
+
+	dbPaidCount := model.GetDB().Model(&model.Order{})
+	if merchantID > 0 {
+		dbPaidCount = dbPaidCount.Where("merchant_id = ?", merchantID)
+	}
+	dbPaidCount.Where("status = ?", model.OrderStatusPaid).Count(&stats.PaidOrders)
+
+	dbExpired := model.GetDB().Model(&model.Order{})
+	if merchantID > 0 {
+		dbExpired = dbExpired.Where("merchant_id = ?", merchantID)
+	}
+	dbExpired.Where("status = ?", model.OrderStatusExpired).Count(&stats.ExpiredOrders)
 
 	// 今日统计
 	today := time.Now().Format("2006-01-02")
@@ -504,11 +599,24 @@ func (s *OrderService) GetOrderStats(merchantID uint) (*model.OrderStats, error)
 
 	todayDB.Count(&stats.TodayOrders)
 
-	var todayMoney, todayUSDT float64
-	todayDB.Where("status = ?", model.OrderStatusPaid).Select("COALESCE(SUM(money), 0)").Scan(&todayMoney)
-	todayDB.Where("status = ?", model.OrderStatusPaid).Select("COALESCE(SUM(actual_amount), 0)").Scan(&todayUSDT)
-	stats.TodayAmount = decimal.NewFromFloat(todayMoney)
-	stats.TodayUSDT = decimal.NewFromFloat(todayUSDT)
+	var todayUSD float64
+	todayDB.Where("status = ?", model.OrderStatusPaid).Select("COALESCE(SUM(settlement_amount), 0)").Scan(&todayUSD)
+	stats.TodayUSD = decimal.NewFromFloat(todayUSD)
+
+	// 可用支付链路数量
+	blockchainService := GetBlockchainService()
+	listenerStatus := blockchainService.GetListenerStatus()
+	availableChannels := 0
+	for _, infoInterface := range listenerStatus {
+		if info, ok := infoInterface.(map[string]interface{}); ok {
+			running, _ := info["running"].(bool)
+			walletCount, _ := info["wallet_count"].(int64)
+			if running && walletCount > 0 {
+				availableChannels++
+			}
+		}
+	}
+	stats.AvailableChannels = availableChannels
 
 	return stats, nil
 }

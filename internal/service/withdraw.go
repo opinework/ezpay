@@ -2,11 +2,13 @@ package service
 
 import (
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
 	"ezpay/internal/model"
 
+	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
 )
 
@@ -34,18 +36,18 @@ func (s *WithdrawService) CreateWithdrawal(merchantID uint, req *WithdrawRequest
 		return nil, errors.New("商户不存在")
 	}
 
-	// 检查可用余额
+	// 检查可用余额（USD）
 	availableBalance := merchant.Balance - merchant.FrozenBalance
 	if req.Amount > availableBalance {
 		return nil, errors.New("可用余额不足")
 	}
 
-	// 最低提现金额检查: 50 USDT
+	// 最低提现金额检查: 50 USD
 	if req.Amount < 50 {
-		return nil, errors.New("最低提现金额为50 USDT")
+		return nil, errors.New("最低提现金额为 50 USD")
 	}
 
-	// 固定手续费: 1 USDT
+	// 固定手续费: 1 USD
 	fee := 1.0
 	realAmount := req.Amount - fee
 
@@ -154,11 +156,38 @@ func (s *WithdrawService) ApproveWithdrawal(id uint, adminRemark string) error {
 		return errors.New("该提现申请已处理")
 	}
 
+	// 计算实际打款金额（使用卖出汇率）
+	var payoutCurrency string
+	switch withdrawal.PayMethod {
+	case "trc20", "erc20", "bep20", "polygon", "optimism", "arbitrum", "avalanche", "base":
+		payoutCurrency = "USDT"
+	case "trx":
+		payoutCurrency = "TRX"
+	default:
+		payoutCurrency = "USDT"
+	}
+
+	// 使用卖出汇率转换
+	rateService := GetRateService()
+	result, err := rateService.ConvertFromSettlementCurrency(
+		decimal.NewFromFloat(withdrawal.RealAmount),
+		payoutCurrency,
+	)
+	if err != nil {
+		return errors.New("计算打款金额失败: " + err.Error())
+	}
+
+	payoutAmount, _ := result.Amount.Float64()
+	payoutRate, _ := result.Rate.Float64()
+
 	now := time.Now()
 	if err := model.GetDB().Model(&withdrawal).Updates(map[string]interface{}{
-		"status":       model.WithdrawStatusApproved,
-		"admin_remark": adminRemark,
-		"processed_at": &now,
+		"status":          model.WithdrawStatusApproved,
+		"admin_remark":    adminRemark,
+		"processed_at":    &now,
+		"payout_amount":   payoutAmount,
+		"payout_currency": payoutCurrency,
+		"payout_rate":     payoutRate,
 	}).Error; err != nil {
 		return err
 	}
@@ -271,25 +300,54 @@ func (s *WithdrawService) getWithdrawFeeRate() float64 {
 }
 
 // AddMerchantBalance 增加商户余额 (订单完成时调用)
+// amount: 结算金额（USD）
+// fee: 订单手续费（USD）
 // feeType: 1=余额扣除(个人收款码), 2=收款扣除(系统收款码)
-// fee: 订单手续费
-// 个人收款码：收款不入余额，但从余额扣除手续费
-// 系统收款码：收款入余额（扣除手续费后）
+//
+// 个人收款码：商户收到币（如 112.41 USDT）→ 增加结算金额（110.16 USD）→ 扣除手续费（1.10 USD）→ 最终余额 +109.06 USD
+// 系统收款码：平台收到币（如 112.41 USDT）→ 增加结算金额（110.16 USD）→ 扣除手续费（1.10 USD）→ 最终余额 +109.06 USD
 func (s *WithdrawService) AddMerchantBalance(merchantID uint, amount float64, fee float64, feeType model.FeeType) error {
-	if feeType == model.FeeTypeBalance {
-		// 个人收款码模式：
-		// - 收款不进入余额（商户自己收到钱了）
-		// - 手续费已预扣(冻结)，解冻并从余额扣除手续费
-		return model.GetDB().Model(&model.Merchant{}).Where("id = ?", merchantID).Updates(map[string]interface{}{
-			"balance":        gorm.Expr("balance - ?", fee),
-			"frozen_balance": gorm.Expr("frozen_balance - ?", fee),
-		}).Error
+	var merchant model.Merchant
+	if err := model.GetDB().First(&merchant, merchantID).Error; err != nil {
+		return err
 	}
 
-	// 系统收款码模式：手续费从收款扣除，剩余金额入余额
-	realAmount := amount - fee
-	return model.GetDB().Model(&model.Merchant{}).Where("id = ?", merchantID).
-		Update("balance", gorm.Expr("balance + ?", realAmount)).Error
+	realAmount := amount - fee // 实际增加的余额
+	var err error
+
+	if feeType == model.FeeTypeBalance {
+		// 个人收款码模式：
+		// 1. 商户钱包实际收到加密货币（如 112.41 USDT）
+		// 2. 系统增加结算金额到余额（amount = 110.16 USD）
+		// 3. 扣除预扣的手续费冻结额
+		// 4. 从余额扣除手续费（fee = 1.10 USD）
+		err = model.GetDB().Model(&model.Merchant{}).Where("id = ?", merchantID).Updates(map[string]interface{}{
+			"balance":        gorm.Expr("balance + ?", realAmount),
+			"frozen_balance": gorm.Expr("frozen_balance - ?", fee),
+		}).Error
+	} else {
+		// 系统收款码模式：
+		// 1. 平台钱包收到加密货币（如 112.41 USDT）
+		// 2. 系统增加结算金额到余额（amount = 110.16 USD）
+		// 3. 扣除手续费后的金额入账
+		err = model.GetDB().Model(&model.Merchant{}).Where("id = ?", merchantID).
+			Update("balance", gorm.Expr("balance + ?", realAmount)).Error
+	}
+
+	if err == nil {
+		// 获取更新后的余额
+		model.GetDB().First(&merchant, merchantID)
+		// 余额变动通知
+		go GetTelegramService().NotifyBalanceChanged(
+			merchantID,
+			"订单入账",
+			decimal.NewFromFloat(realAmount),
+			decimal.NewFromFloat(merchant.Balance),
+			fmt.Sprintf("订单结算 USD %.2f，扣除手续费 USD %.2f", amount, fee),
+		)
+	}
+
+	return err
 }
 
 // RefundPreChargedFee 退还预扣的手续费 (订单失败/取消时)

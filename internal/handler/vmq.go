@@ -253,20 +253,16 @@ func (h *VmqHandler) AppPush(c *gin.Context) {
 
 	// 查找匹配的待支付订单 (按金额匹配)
 	var order model.Order
+	// 优先使用 unique_amount 精确匹配
 	err = model.GetDB().
-		Where("chain = ? AND usdt_amount = ? AND status = ?", chain, amount, model.OrderStatusPending).
+		Where("chain = ? AND unique_amount = ? AND status = ?", chain, amount, model.OrderStatusPending).
 		Order("created_at ASC").
 		First(&order).Error
 
 	if err != nil {
-		// 尝试模糊匹配
-		tolerance := amount.Mul(decimal.NewFromFloat(0.0001))
-		minAmount := amount.Sub(tolerance)
-		maxAmount := amount.Add(tolerance)
-
+		// 兼容旧订单：尝试使用 usdt_amount 精确匹配
 		err = model.GetDB().
-			Where("chain = ? AND usdt_amount BETWEEN ? AND ? AND status = ?",
-				chain, minAmount, maxAmount, model.OrderStatusPending).
+			Where("chain = ? AND usdt_amount = ? AND status = ?", chain, amount, model.OrderStatusPending).
 			Order("created_at ASC").
 			First(&order).Error
 

@@ -78,6 +78,7 @@ type Merchant struct {
 	RefererWhitelist string     `gorm:"type:text" json:"referer_whitelist"`                 // Referer域名白名单,逗号分隔
 	TelegramChatID int64          `gorm:"default:0" json:"telegram_chat_id"`                  // Telegram Chat ID (绑定后用于接收通知)
 	TelegramNotify bool           `gorm:"default:true" json:"telegram_notify"`                // 是否开启Telegram通知
+	TelegramStatus string         `gorm:"type:varchar(20);default:'unbound'" json:"telegram_status"` // Telegram状态: normal正常, blocked被封禁, unbound未绑定
 	NotifySettings NotifySettings `gorm:"type:json" json:"notify_settings"`                   // 通知设置详情
 	WalletMode     int8           `gorm:"default:3" json:"wallet_mode"`                       // 钱包模式: 1=仅系统钱包 2=仅个人钱包 3=两者同时(优先个人)
 	CreatedAt    time.Time      `json:"created_at"`
@@ -110,22 +111,25 @@ const (
 
 // Withdrawal 提现记录
 type Withdrawal struct {
-	ID         uint           `gorm:"primaryKey" json:"id"`
-	MerchantID uint           `gorm:"index;not null" json:"merchant_id"`
-	Merchant   Merchant       `gorm:"foreignKey:MerchantID" json:"-"`
-	Amount     float64        `gorm:"type:decimal(18,2);not null" json:"amount"`     // 提现金额
-	Fee        float64        `gorm:"type:decimal(18,2);default:0" json:"fee"`       // 手续费
-	RealAmount float64        `gorm:"type:decimal(18,2);not null" json:"real_amount"` // 实际到账
-	PayMethod  string         `gorm:"type:varchar(20)" json:"pay_method"`            // 打款方式: bank, alipay, wechat, usdt
-	Account    string         `gorm:"type:varchar(200)" json:"account"`              // 收款账号
-	AccountName string        `gorm:"type:varchar(100)" json:"account_name"`         // 收款人姓名
-	BankName   string         `gorm:"type:varchar(100)" json:"bank_name"`            // 银行名称(银行卡提现)
-	Status     WithdrawStatus `gorm:"default:0" json:"status"`
-	Remark     string         `gorm:"type:varchar(500)" json:"remark"`               // 备注
-	AdminRemark string        `gorm:"type:varchar(500)" json:"admin_remark"`         // 管理员备注
-	ProcessedAt *time.Time    `json:"processed_at"`                                  // 处理时间
-	CreatedAt  time.Time      `json:"created_at"`
-	UpdatedAt  time.Time      `json:"updated_at"`
+	ID              uint           `gorm:"primaryKey" json:"id"`
+	MerchantID      uint           `gorm:"index;not null" json:"merchant_id"`
+	Merchant        Merchant       `gorm:"foreignKey:MerchantID" json:"-"`
+	Amount          float64        `gorm:"type:decimal(18,2);not null" json:"amount"`          // 提现金额（USD）
+	Fee             float64        `gorm:"type:decimal(18,2);default:0" json:"fee"`            // 手续费（USD）
+	RealAmount      float64        `gorm:"type:decimal(18,2);not null" json:"real_amount"`     // 扣除手续费后金额（USD）
+	PayoutAmount    float64        `gorm:"type:decimal(18,6);default:0" json:"payout_amount"`  // 实际打款金额（USDT/TRX等）
+	PayoutCurrency  string         `gorm:"type:varchar(10)" json:"payout_currency"`            // 打款货币: USDT, TRX等
+	PayoutRate      float64        `gorm:"type:decimal(10,4);default:0" json:"payout_rate"`    // 打款汇率（卖出汇率）
+	PayMethod       string         `gorm:"type:varchar(20)" json:"pay_method"`                 // 打款方式: trc20, erc20, bep20等
+	Account         string         `gorm:"type:varchar(200)" json:"account"`                   // 收款账号
+	AccountName     string         `gorm:"type:varchar(100)" json:"account_name"`              // 收款人姓名
+	BankName        string         `gorm:"type:varchar(100)" json:"bank_name"`                 // 银行名称(银行卡提现)
+	Status          WithdrawStatus `gorm:"default:0" json:"status"`
+	Remark          string         `gorm:"type:varchar(500)" json:"remark"`                    // 备注
+	AdminRemark     string         `gorm:"type:varchar(500)" json:"admin_remark"`              // 管理员备注
+	ProcessedAt     *time.Time     `json:"processed_at"`                                       // 处理时间
+	CreatedAt       time.Time      `json:"created_at"`
+	UpdatedAt       time.Time      `json:"updated_at"`
 }
 
 func (Withdrawal) TableName() string {

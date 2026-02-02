@@ -96,22 +96,33 @@ func (s *NotifyService) NotifyOrder(orderID uint) {
 		"notify_status": model.NotifyStatusFailed,
 	})
 	log.Printf("NotifyOrder: failed for order: %s after %d retries", order.TradeNo, maxRetry)
+
+	// 回调失败通知
+	go GetTelegramService().NotifyCallbackFailed(&order, maxRetry, "回调失败，已达到最大重试次数")
 }
 
-// sendNotify 发送通知请求
-func (s *NotifyService) sendNotify(notifyURL string, params map[string]string) bool {
-	// 构建查询字符串
+// encodeQueryString 构建查询字符串，空格编码为 %20 而不是 +
+// 这样接收方无论用 QueryUnescape 还是 PathUnescape 都能正确解码
+func encodeQueryString(params map[string]string) string {
 	values := url.Values{}
 	for k, v := range params {
 		values.Set(k, v)
 	}
+	// url.Values.Encode() 会把空格编码为 +，需要替换为 %20
+	return strings.ReplaceAll(values.Encode(), "+", "%20")
+}
+
+// sendNotify 发送通知请求
+func (s *NotifyService) sendNotify(notifyURL string, params map[string]string) bool {
+	// 构建查询字符串（空格用 %20 编码）
+	queryString := encodeQueryString(params)
 
 	// GET 请求
 	fullURL := notifyURL
 	if strings.Contains(notifyURL, "?") {
-		fullURL += "&" + values.Encode()
+		fullURL += "&" + queryString
 	} else {
-		fullURL += "?" + values.Encode()
+		fullURL += "?" + queryString
 	}
 
 	client := &http.Client{Timeout: 30 * time.Second}
@@ -179,16 +190,14 @@ func (s *NotifyService) BuildReturnURL(order *model.Order, merchant *model.Merch
 		params["param"] = order.Param
 	}
 
-	values := url.Values{}
-	for k, v := range params {
-		values.Set(k, v)
-	}
+	// 使用 %20 编码空格
+	queryString := encodeQueryString(params)
 
 	returnURL := order.ReturnURL
 	if strings.Contains(returnURL, "?") {
-		returnURL += "&" + values.Encode()
+		returnURL += "&" + queryString
 	} else {
-		returnURL += "?" + values.Encode()
+		returnURL += "?" + queryString
 	}
 
 	return returnURL

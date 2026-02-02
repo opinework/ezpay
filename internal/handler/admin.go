@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"ezpay/config"
+	"ezpay/internal/middleware"
 	"ezpay/internal/model"
 	"ezpay/internal/service"
 	"ezpay/internal/util"
@@ -146,18 +147,19 @@ func (h *AdminHandler) DashboardTrend(c *gin.Context) {
 	}
 
 	var trends []struct {
-		Label  string  `json:"label"`
-		Count  int64   `json:"count"`
-		Amount float64 `json:"amount"`
+		Label     string  `json:"label"`
+		Count     int64   `json:"count"`
+		AmountUSD float64 `json:"amount_usd"`
 	}
 
 	query := model.GetDB().Model(&model.Order{}).
 		Where("status = 1 AND created_at >= ?", startDate)
 
+	// 使用 settlement_amount 作为 USD 金额
 	if period == "3months" {
-		query.Select("MIN(DATE_FORMAT(created_at, ?)) as label, COUNT(*) as count, COALESCE(SUM(money), 0) as amount", dateFormat)
+		query.Select("MIN(DATE_FORMAT(created_at, ?)) as label, COUNT(*) as count, COALESCE(SUM(settlement_amount), 0) as amount_usd", dateFormat)
 	} else {
-		query.Select("DATE_FORMAT(created_at, ?) as label, COUNT(*) as count, COALESCE(SUM(money), 0) as amount", dateFormat)
+		query.Select("DATE_FORMAT(created_at, ?) as label, COUNT(*) as count, COALESCE(SUM(settlement_amount), 0) as amount_usd", dateFormat)
 	}
 
 	query.Group(groupBy).Order("label ASC").Scan(&trends)
@@ -169,11 +171,12 @@ func (h *AdminHandler) DashboardTrend(c *gin.Context) {
 	for i, t := range trends {
 		labels[i] = t.Label
 		orders[i] = t.Count
-		amounts[i] = t.Amount
+		amounts[i] = t.AmountUSD
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"code": 1,
+		"code":     1,
+		"currency": "USD",
 		"data": gin.H{
 			"labels":  labels,
 			"orders":  orders,
@@ -182,21 +185,21 @@ func (h *AdminHandler) DashboardTrend(c *gin.Context) {
 	})
 }
 
-// DashboardTop 商户排行榜
+// DashboardTop 商户排行榜 (金额使用 USD)
 func (h *AdminHandler) DashboardTop(c *gin.Context) {
-	// 金额 TOP 5
+	// 金额 TOP 5 (使用 settlement_amount 作为 USD)
 	var topAmount []struct {
 		MerchantID uint    `json:"merchant_id"`
 		PID        string  `json:"pid"`
 		Name       string  `json:"name"`
-		Amount     float64 `json:"amount"`
+		AmountUSD  float64 `json:"amount_usd"`
 	}
 	model.GetDB().Model(&model.Order{}).
-		Select("orders.merchant_id, merchants.p_id as pid, merchants.name, COALESCE(SUM(orders.money), 0) as amount").
+		Select("orders.merchant_id, merchants.p_id as pid, merchants.name, COALESCE(SUM(orders.settlement_amount), 0) as amount_usd").
 		Joins("LEFT JOIN merchants ON merchants.id = orders.merchant_id").
 		Where("orders.status = 1").
 		Group("orders.merchant_id").
-		Order("amount DESC").
+		Order("amount_usd DESC").
 		Limit(5).
 		Scan(&topAmount)
 
@@ -217,7 +220,8 @@ func (h *AdminHandler) DashboardTop(c *gin.Context) {
 		Scan(&topCount)
 
 	c.JSON(http.StatusOK, gin.H{
-		"code": 1,
+		"code":     1,
+		"currency": "USD",
 		"data": gin.H{
 			"top_amount": topAmount,
 			"top_count":  topCount,
@@ -352,6 +356,14 @@ func (h *AdminHandler) CleanInvalidOrders(c *gin.Context) {
 	// 计算24小时前的时间
 	cutoffTime := time.Now().Add(-24 * time.Hour)
 
+	// 先统计所有待支付和已过期的订单
+	var totalPending int64
+	model.GetDB().Model(&model.Order{}).Where("status IN (?, ?)", model.OrderStatusPending, model.OrderStatusExpired).Count(&totalPending)
+
+	// 统计24小时前的订单
+	var oldOrders int64
+	model.GetDB().Model(&model.Order{}).Where("status IN (?, ?) AND created_at < ?", model.OrderStatusPending, model.OrderStatusExpired, cutoffTime).Count(&oldOrders)
+
 	// 先查询需要清理的订单，以便退还手续费
 	var orders []model.Order
 	if err := model.GetDB().Where(
@@ -391,10 +403,13 @@ func (h *AdminHandler) CleanInvalidOrders(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"code":         1,
-		"msg":          fmt.Sprintf("清理成功，退还%d笔预扣手续费", refundCount),
-		"count":        result.RowsAffected,
-		"refund_count": refundCount,
+		"code":              1,
+		"msg":               fmt.Sprintf("清理成功，删除 %d 个订单，退还 %d 笔预扣手续费", result.RowsAffected, refundCount),
+		"count":             result.RowsAffected,
+		"refund_count":      refundCount,
+		"total_pending":     totalPending,
+		"old_orders_before": oldOrders,
+		"cutoff_time":       cutoffTime.Format("2006-01-02 15:04:05"),
 	})
 }
 
@@ -717,12 +732,15 @@ func (h *AdminHandler) UploadQRCode(c *gin.Context) {
 	// 确保上传目录存在（使用配置的数据目录）
 	dataDir := config.Get().Storage.DataDir
 	qrcodeDir := dataDir + "/qrcode"
-	os.MkdirAll(qrcodeDir, 0755)
+	if err := os.MkdirAll(qrcodeDir, 0755); err != nil {
+		c.JSON(http.StatusOK, gin.H{"code": -1, "msg": "创建目录失败: " + err.Error()})
+		return
+	}
 	filepath := qrcodeDir + "/" + filename
 
 	// 保存文件
 	if err := c.SaveUploadedFile(file, filepath); err != nil {
-		c.JSON(http.StatusOK, gin.H{"code": -1, "msg": "保存文件失败"})
+		c.JSON(http.StatusOK, gin.H{"code": -1, "msg": "保存文件失败: " + err.Error()})
 		return
 	}
 
@@ -1398,6 +1416,13 @@ func (h *AdminHandler) AddIPBlacklist(c *gin.Context) {
 		return
 	}
 
+	// 使缓存失效，立即生效
+	middleware.InvalidateIPBlacklistCache()
+
+	// IP被封禁通知 - 发送给所有商户（如果是商户IP可以根据API日志关联）
+	// 这里简化处理，只记录到管理员
+	go service.GetBotService().NotifySystemEvent(fmt.Sprintf("🚫 IP已加入黑名单\n\nIP: %s\n原因: %s", req.IP, req.Reason))
+
 	c.JSON(http.StatusOK, gin.H{"code": 1, "msg": "添加成功"})
 }
 
@@ -1409,6 +1434,9 @@ func (h *AdminHandler) RemoveIPBlacklist(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"code": -1, "msg": "删除失败"})
 		return
 	}
+
+	// 使缓存失效，立即生效
+	middleware.InvalidateIPBlacklistCache()
 
 	c.JSON(http.StatusOK, gin.H{"code": 1, "msg": "删除成功"})
 }
@@ -1441,6 +1469,9 @@ func (h *AdminHandler) BlockIPFromAPILog(c *gin.Context) {
 		return
 	}
 
+	// 使缓存失效，立即生效
+	middleware.InvalidateIPBlacklistCache()
+
 	c.JSON(http.StatusOK, gin.H{"code": 1, "msg": "已将 " + req.IP + " 加入黑名单"})
 }
 
@@ -1453,10 +1484,22 @@ func (h *AdminHandler) CreateTestOrder(c *gin.Context) {
 		Type       string `json:"type" binding:"required"`
 		Money      string `json:"money" binding:"required"`
 		Name       string `json:"name"`
+		Currency   string `json:"currency"` // USD, EUR, CNY
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusOK, gin.H{"code": -1, "msg": "参数错误"})
+		return
+	}
+
+	// 设置默认币种为 USD
+	currency := req.Currency
+	if currency == "" {
+		currency = "USD"
+	}
+	// 验证币种
+	if currency != "USD" && currency != "EUR" && currency != "CNY" {
+		c.JSON(http.StatusOK, gin.H{"code": -1, "msg": "不支持的币种，仅支持 USD, EUR, CNY"})
 		return
 	}
 
@@ -1486,6 +1529,7 @@ func (h *AdminHandler) CreateTestOrder(c *gin.Context) {
 		ReturnURL:   merchant.ReturnURL,
 		Name:        name,
 		Money:       req.Money,
+		Currency:    currency,
 		Param:       "test=1",
 		ClientIP:    c.ClientIP(),
 	}

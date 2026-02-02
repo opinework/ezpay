@@ -121,6 +121,8 @@ func autoMigrate() error {
 		&IPBlacklist{},
 		&WithdrawAddress{},
 		&AppVersion{},
+		&ExchangeRate{},
+		&ExchangeRateHistory{},
 	)
 }
 
@@ -206,6 +208,7 @@ func initDefaultData() error {
 		{Key: ConfigKeySiteName, Value: "EzPay", Description: "网站名称"},
 		{Key: ConfigKeySystemWalletFeeRate, Value: "0.02", Description: "系统收款码手续费率 (如0.02表示2%)"},
 		{Key: ConfigKeyPersonalWalletFeeRate, Value: "0.01", Description: "个人收款码手续费率 (如0.01表示1%)"},
+		{Key: ConfigKeyRateAutoUpdate, Value: "1", Description: "汇率自动更新: 1启用 0禁用"},
 	}
 
 	for _, cfg := range defaultConfigs {

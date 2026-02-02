@@ -301,7 +301,7 @@ func (s *ChannelService) HandleUpstreamNotify(channelType ChannelType, localTrad
 		return nil
 	}
 
-	// 更新订单状态
+	// 更新订单状态（使用乐观锁防止并发重复处理）
 	now := time.Now()
 	updates := map[string]interface{}{
 		"status":           model.OrderStatusPaid,
@@ -310,8 +310,18 @@ func (s *ChannelService) HandleUpstreamNotify(channelType ChannelType, localTrad
 		"channel_order_id": upstreamOrderID,
 	}
 
-	if err := model.GetDB().Model(&order).Updates(updates).Error; err != nil {
-		return fmt.Errorf("update order failed: %w", err)
+	result := model.GetDB().Model(&order).
+		Where("status = ?", model.OrderStatusPending).
+		Updates(updates)
+
+	if result.Error != nil {
+		return fmt.Errorf("update order failed: %w", result.Error)
+	}
+
+	// 如果没有更新任何行，说明订单已被其他进程处理
+	if result.RowsAffected == 0 {
+		log.Printf("Order %s already processed by another process", localTradeNo)
+		return nil
 	}
 
 	// 重新加载订单数据

@@ -69,6 +69,8 @@ func (h *MerchantHandler) Login(c *gin.Context) {
 	}
 
 	if !util.CheckPassword(req.Password, merchant.Password) {
+		// 登录失败通知（可以在此处统计失败次数，这里简化处理）
+		go service.GetTelegramService().NotifyLoginFailed(merchant.ID, c.ClientIP(), 1)
 		c.JSON(http.StatusOK, gin.H{"code": -1, "msg": "密码错误"})
 		return
 	}
@@ -86,6 +88,9 @@ func (h *MerchantHandler) Login(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"code": -1, "msg": "Token生成失败"})
 		return
 	}
+
+	// 登录成功通知
+	go service.GetTelegramService().NotifyLoginSuccess(merchant.ID, c.ClientIP(), c.GetHeader("User-Agent"))
 
 	c.JSON(http.StatusOK, gin.H{
 		"code": 1,
@@ -208,6 +213,9 @@ func (h *MerchantHandler) ResetKey(c *gin.Context) {
 	newKey := util.GenerateMerchantKey()
 	model.DB.Model(merchant).Update("key", newKey)
 
+	// 密钥重置通知
+	go service.GetTelegramService().NotifyKeyRegenerated(merchant.ID, c.ClientIP())
+
 	c.JSON(http.StatusOK, gin.H{
 		"code": 1,
 		"msg":  "密钥已重置",
@@ -217,29 +225,29 @@ func (h *MerchantHandler) ResetKey(c *gin.Context) {
 	})
 }
 
-// Dashboard 商户仪表盘
+// Dashboard 商户仪表盘 (金额统一使用 USD)
 func (h *MerchantHandler) Dashboard(c *gin.Context) {
 	merchantID := c.MustGet("merchant_id").(uint)
 
-	// 今日统计
+	// 今日统计 (使用 actual_amount 作为 USD)
 	today := time.Now().Format("2006-01-02")
 	var todayStats struct {
-		Count  int64   `json:"count"`
-		Amount float64 `json:"amount"`
+		Count     int64   `json:"count"`
+		AmountUSD float64 `json:"amount_usd"`
 	}
 	model.DB.Model(&model.Order{}).
 		Where("merchant_id = ? AND DATE(created_at) = ? AND status = 1", merchantID, today).
-		Select("COUNT(*) as count, COALESCE(SUM(money), 0) as amount").
+		Select("COUNT(*) as count, COALESCE(SUM(settlement_amount), 0) as amount_usd").
 		Scan(&todayStats)
 
-	// 总统计
+	// 总统计 (使用 settlement_amount 作为 USD)
 	var totalStats struct {
-		Count  int64   `json:"count"`
-		Amount float64 `json:"amount"`
+		Count     int64   `json:"count"`
+		AmountUSD float64 `json:"amount_usd"`
 	}
 	model.DB.Model(&model.Order{}).
 		Where("merchant_id = ? AND status = 1", merchantID).
-		Select("COUNT(*) as count, COALESCE(SUM(money), 0) as amount").
+		Select("COUNT(*) as count, COALESCE(SUM(settlement_amount), 0) as amount_usd").
 		Scan(&totalStats)
 
 	// 待支付订单数
@@ -248,29 +256,30 @@ func (h *MerchantHandler) Dashboard(c *gin.Context) {
 		Where("merchant_id = ? AND status = 0", merchantID).
 		Count(&pendingCount)
 
-	// 最近7天趋势
+	// 最近7天趋势 (使用 settlement_amount 作为 USD)
 	var trends []struct {
-		Date   string  `json:"date"`
-		Count  int64   `json:"count"`
-		Amount float64 `json:"amount"`
+		Date      string  `json:"date"`
+		Count     int64   `json:"count"`
+		AmountUSD float64 `json:"amount_usd"`
 	}
 	model.DB.Model(&model.Order{}).
 		Where("merchant_id = ? AND status = 1 AND created_at >= ?", merchantID, time.Now().AddDate(0, 0, -7)).
-		Select("DATE(created_at) as date, COUNT(*) as count, COALESCE(SUM(money), 0) as amount").
+		Select("DATE(created_at) as date, COUNT(*) as count, COALESCE(SUM(settlement_amount), 0) as amount_usd").
 		Group("DATE(created_at)").
 		Order("date ASC").
 		Scan(&trends)
 
 	c.JSON(http.StatusOK, gin.H{
-		"code": 1,
+		"code":     1,
+		"currency": "USD",
 		"data": gin.H{
 			"today": gin.H{
 				"orders": todayStats.Count,
-				"amount": todayStats.Amount,
+				"amount": todayStats.AmountUSD,
 			},
 			"total": gin.H{
 				"orders": totalStats.Count,
-				"amount": totalStats.Amount,
+				"amount": totalStats.AmountUSD,
 			},
 			"pending": pendingCount,
 			"trends":  trends,
@@ -316,20 +325,21 @@ func (h *MerchantHandler) DashboardTrend(c *gin.Context) {
 	}
 
 	var trends []struct {
-		Label  string  `json:"label"`
-		Count  int64   `json:"count"`
-		Amount float64 `json:"amount"`
+		Label     string  `json:"label"`
+		Count     int64   `json:"count"`
+		AmountUSD float64 `json:"amount_usd"`
 	}
 
 	query := model.DB.Model(&model.Order{}).
 		Where("merchant_id = ? AND status = 1 AND created_at >= ?", merchantID, startDate)
 
+	// 使用 settlement_amount 作为 USD 金额
 	if period == "today" {
-		query.Select("DATE_FORMAT(created_at, ?) as label, COUNT(*) as count, COALESCE(SUM(money), 0) as amount", dateFormat)
+		query.Select("DATE_FORMAT(created_at, ?) as label, COUNT(*) as count, COALESCE(SUM(settlement_amount), 0) as amount_usd", dateFormat)
 	} else if period == "3months" {
-		query.Select("MIN(DATE_FORMAT(created_at, ?)) as label, COUNT(*) as count, COALESCE(SUM(money), 0) as amount", dateFormat)
+		query.Select("MIN(DATE_FORMAT(created_at, ?)) as label, COUNT(*) as count, COALESCE(SUM(settlement_amount), 0) as amount_usd", dateFormat)
 	} else {
-		query.Select("DATE_FORMAT(created_at, ?) as label, COUNT(*) as count, COALESCE(SUM(money), 0) as amount", dateFormat)
+		query.Select("DATE_FORMAT(created_at, ?) as label, COUNT(*) as count, COALESCE(SUM(settlement_amount), 0) as amount_usd", dateFormat)
 	}
 
 	query.Group(groupBy).Order("label ASC").Scan(&trends)
@@ -342,11 +352,12 @@ func (h *MerchantHandler) DashboardTrend(c *gin.Context) {
 	for i, t := range trends {
 		labels[i] = t.Label
 		orders[i] = t.Count
-		amounts[i] = t.Amount
+		amounts[i] = t.AmountUSD
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"code": 1,
+		"code":     1,
+		"currency": "USD",
 		"data": gin.H{
 			"labels":  labels,
 			"orders":  orders,
@@ -450,7 +461,7 @@ func (h *MerchantHandler) ConfirmPayment(c *gin.Context) {
 	updates := map[string]interface{}{
 		"status":        model.OrderStatusPaid,
 		"tx_hash":       "MANUAL_CONFIRM_" + fmt.Sprintf("%d", now.Unix()),
-		"actual_amount": order.USDTAmount,
+		"actual_amount": order.UniqueAmount,
 		"paid_at":       &now,
 	}
 
@@ -684,6 +695,9 @@ func (h *MerchantHandler) CreateWallet(c *gin.Context) {
 		return
 	}
 
+	// 钱包添加通知
+	go service.GetTelegramService().NotifyWalletAdded(merchantID, req.Chain, req.Address)
+
 	c.JSON(http.StatusOK, gin.H{"code": 1, "msg": "创建成功", "data": wallet})
 }
 
@@ -754,6 +768,9 @@ func (h *MerchantHandler) DeleteWallet(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"code": -1, "msg": "删除失败"})
 		return
 	}
+
+	// 钱包移除通知
+	go service.GetTelegramService().NotifyWalletRemoved(merchantID, wallet.Chain, wallet.Address)
 
 	c.JSON(http.StatusOK, gin.H{"code": 1, "msg": "删除成功"})
 }

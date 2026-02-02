@@ -43,13 +43,15 @@ type Order struct {
 	Merchant       *Merchant       `gorm:"foreignKey:MerchantID" json:"merchant,omitempty"`
 	Type           string          `gorm:"type:varchar(20);not null" json:"type"` // usdt_trc20, usdt_erc20, usdt_bep20, usdt_polygon
 	Name           string          `gorm:"type:varchar(200)" json:"name"`
-	Currency       string          `gorm:"type:varchar(10);default:'CNY'" json:"currency"` // 原始货币: CNY, USD, USDT 等
-	Money          decimal.Decimal `gorm:"type:decimal(18,6);not null" json:"money"`       // 原始金额
-	PayAmount      decimal.Decimal `gorm:"type:decimal(18,6)" json:"pay_amount"`           // 实际支付金额(目标货币)
-	PayCurrency    string          `gorm:"type:varchar(10)" json:"pay_currency"`           // 支付货币: USDT, TRX, CNY
-	USDTAmount     decimal.Decimal `gorm:"type:decimal(18,6)" json:"usdt_amount"`          // USDT金额(兼容旧字段)
-	ActualAmount   decimal.Decimal `gorm:"type:decimal(18,6)" json:"actual_amount"`       // 实际收到USDT金额
-	Rate           decimal.Decimal `gorm:"type:decimal(10,4)" json:"rate"`                // 汇率
+	Currency         string          `gorm:"type:varchar(10);default:'CNY'" json:"currency"`   // 原始货币: CNY, USD, USDT, EUR 等
+	Money            decimal.Decimal `gorm:"type:decimal(18,6);not null" json:"money"`         // 原始金额
+	PayAmount        decimal.Decimal `gorm:"type:decimal(18,6)" json:"pay_amount"`             // 用户应支付金额(展示用，无偏移)
+	UniqueAmount     decimal.Decimal `gorm:"type:decimal(18,6)" json:"unique_amount"`          // 订单标识金额(含偏移，用于匹配)
+	PayCurrency      string          `gorm:"type:varchar(10)" json:"pay_currency"`             // 支付货币: USDT, TRX, CNY
+	USDTAmount       decimal.Decimal `gorm:"type:decimal(18,6)" json:"usdt_amount"`            // USDT金额(兼容旧字段)
+	SettlementAmount decimal.Decimal `gorm:"type:decimal(18,6)" json:"settlement_amount"`      // 结算金额（USD，计入商户余额）
+	ActualAmount     decimal.Decimal `gorm:"type:decimal(18,6)" json:"actual_amount"`         // 实际收到金额
+	Rate             decimal.Decimal `gorm:"type:decimal(10,4)" json:"rate"`                  // 汇率（买入汇率，用户支付时）
 	Chain          string          `gorm:"type:varchar(20)" json:"chain"`                 // trc20, erc20, bep20, polygon
 	ToAddress      string          `gorm:"type:varchar(100)" json:"to_address"`           // 收款地址
 	FromAddress    string          `gorm:"type:varchar(100)" json:"from_address"`         // 付款地址
@@ -93,15 +95,14 @@ type OrderQuery struct {
 	PageSize     int         `form:"page_size"`
 }
 
-// OrderStats 订单统计
+// OrderStats 订单统计 (金额统一使用 USD)
 type OrderStats struct {
-	TotalOrders     int64           `json:"total_orders"`
-	TotalAmount     decimal.Decimal `json:"total_amount"`
-	TotalUSDT       decimal.Decimal `json:"total_usdt"`
-	PendingOrders   int64           `json:"pending_orders"`
-	PaidOrders      int64           `json:"paid_orders"`
-	ExpiredOrders   int64           `json:"expired_orders"`
-	TodayOrders     int64           `json:"today_orders"`
-	TodayAmount     decimal.Decimal `json:"today_amount"`
-	TodayUSDT       decimal.Decimal `json:"today_usdt"`
+	TotalOrders       int64           `json:"total_orders"`
+	TotalUSD          decimal.Decimal `json:"total_usd"`           // 总金额 (USD)
+	PendingOrders     int64           `json:"pending_orders"`
+	PaidOrders        int64           `json:"paid_orders"`
+	ExpiredOrders     int64           `json:"expired_orders"`
+	TodayOrders       int64           `json:"today_orders"`
+	TodayUSD          decimal.Decimal `json:"today_usd"`           // 今日金额 (USD)
+	AvailableChannels int             `json:"available_channels"`  // 可用支付链路数量
 }

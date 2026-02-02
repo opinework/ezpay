@@ -174,8 +174,7 @@ func (s *BotService) NotifyDailyReport() {
 📅 日期: %s
 
 今日订单: %d
-今日收款: ¥%s
-今日USDT: %s
+今日收款: $%s USD
 
 总订单数: %d
 待支付: %d
@@ -183,8 +182,7 @@ func (s *BotService) NotifyDailyReport() {
 已过期: %d`,
 		time.Now().Format("2006-01-02"),
 		stats.TodayOrders,
-		stats.TodayAmount.String(),
-		stats.TodayUSDT.String(),
+		stats.TodayUSD.String(),
 		stats.TotalOrders,
 		stats.PendingOrders,
 		stats.PaidOrders,
@@ -264,6 +262,12 @@ func (s *BotService) sendTelegram(message string) {
 		body, _ := io.ReadAll(resp.Body)
 		log.Printf("Telegram response error: %s", string(body))
 	}
+}
+
+// NotifySystemEvent 通知系统事件给管理员
+func (s *BotService) NotifySystemEvent(message string) {
+	go s.sendTelegram(message)
+	go s.sendDiscord("系统事件", message, 0x95a5a6) // 灰色
 }
 
 // sendDiscord 发送Discord消息

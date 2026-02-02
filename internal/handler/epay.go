@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"log"
 	"net/http"
 	"strings"
 
@@ -65,7 +66,7 @@ func (h *EpayHandler) Submit(c *gin.Context) {
 		return
 	}
 
-	// 验证签名
+	// 验证签名 - 使用标准解码后的参数
 	params := map[string]string{
 		"pid":          pid,
 		"type":         payType,
@@ -82,7 +83,9 @@ func (h *EpayHandler) Submit(c *gin.Context) {
 		signType = "MD5"
 	}
 
+	// 验证签名
 	if !util.VerifySign(params, merchant.Key, sign) {
+		log.Printf("[Submit] 签名验证失败, 收到: %s, 计算: %s", sign, util.GenerateSign(params, merchant.Key))
 		middleware.SetAPILogContext(c, -1, "签名验证失败", "", merchant.ID, pid)
 		h.renderError(c, "签名验证失败")
 		return
@@ -195,6 +198,7 @@ func (h *EpayHandler) MAPISubmit(c *gin.Context) {
 	}
 
 	if !util.VerifySign(params, merchant.Key, sign) {
+		log.Printf("[MAPISubmit] 签名验证失败, 收到: %s, 计算: %s", sign, util.GenerateSign(params, merchant.Key))
 		middleware.SetAPILogContext(c, -1, "签名验证失败", "", merchant.ID, pid)
 		c.JSON(http.StatusOK, gin.H{
 			"code": -1,

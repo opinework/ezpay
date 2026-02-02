@@ -35,7 +35,9 @@ services:
       - "3306:3306"
     volumes:
       - mysql_data:/var/lib/mysql
-      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - ./db/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+      # Uncomment for database migrations (upgrading existing database)
+      # - ./db/migrate_usd_settlement.sql:/docker-entrypoint-initdb.d/02-migrate.sql:ro
     environment:
       - MYSQL_ROOT_PASSWORD=root123456
       - MYSQL_DATABASE=ezpay

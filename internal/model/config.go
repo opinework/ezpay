@@ -21,7 +21,10 @@ func (SystemConfig) TableName() string {
 const (
 	ConfigKeyRateMode            = "rate_mode"              // 汇率模式
 	ConfigKeyManualRate          = "manual_rate"            // 手动汇率
-	ConfigKeyFloatPercent        = "float_percent"          // 浮动百分比
+	ConfigKeyFloatPercent        = "float_percent"          // 浮动百分比（已废弃，使用 rate_buy_float）
+	ConfigKeyRateBuyFloat        = "rate_buy_float"         // 买入汇率浮动（用户支付时），如0.02表示+2%
+	ConfigKeyRateSellFloat       = "rate_sell_float"        // 卖出汇率浮动（商户提现时），如-0.02表示-2%
+	ConfigKeyRateAutoUpdate      = "rate_auto_update"       // 汇率自动更新开关: 1启用 0禁用
 	ConfigKeyOrderExpire         = "order_expire"           // 订单过期时间(分钟)
 	ConfigKeyNotifyRetry         = "notify_retry"           // 通知重试次数
 	ConfigKeySiteName            = "site_name"              // 网站名称

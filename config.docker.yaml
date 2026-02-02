@@ -44,11 +44,13 @@ log:
   api_log_days: 30
 
 rate:
-  mode: "hybrid"
+  mode: "hybrid"           # auto: 自动, manual: 手动, hybrid: 混合
   manual_rate: 7.2
   float_percent: 0
+  buy_float: 0.02          # 买入汇率浮动（用户支付时，平台收入）2%
+  sell_float: 0.02         # 卖出汇率浮动（商户提现时，平台支出）2%
   cache_seconds: 300
-  source: "binance"
+  source: "binance"        # binance, okx
 
 blockchain:
   trc20:

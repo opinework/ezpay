@@ -319,28 +319,28 @@
         <div class="header {{.order.Chain}}">
             {{if eq .order.Chain "wechat"}}
             <h1 data-i18n="cashier.wechatPay">微信支付</h1>
-            <div class="amount">¥{{.order.Money}}</div>
+            <div class="amount">¥{{.order.UniqueAmount}}</div>
             {{else if eq .order.Chain "alipay"}}
             <h1 data-i18n="cashier.alipay">支付宝支付</h1>
-            <div class="amount">¥{{.order.Money}}</div>
+            <div class="amount">¥{{.order.UniqueAmount}}</div>
             {{else if eq .order.Chain "trx"}}
             <h1 data-i18n="cashier.trxPay">TRX 支付</h1>
-            <div class="amount">{{.order.USDTAmount}} <small>TRX</small></div>
-            <div class="cny">≈ ¥{{.order.Money}}</div>
+            <div class="amount">{{.order.UniqueAmount}} <small>TRX</small></div>
             {{else}}
             <h1 data-i18n="cashier.usdtPay">USDT 支付</h1>
-            <div class="amount">{{.order.USDTAmount}} <small>USDT</small></div>
-            <div class="cny">≈ ¥{{.order.Money}}</div>
+            <div class="amount">{{.order.UniqueAmount}} <small>USDT</small></div>
             {{end}}
         </div>
 
         <div class="content" id="payContent">
+            {{if or (eq .order.Chain "wechat") (eq .order.Chain "alipay")}}
             <div class="chain-info">
-                <span id="chainLabel">{{if or (eq .order.Chain "wechat") (eq .order.Chain "alipay")}}支付方式{{else}}网络{{end}}:</span>
+                <span id="chainLabel">支付方式:</span>
                 <span class="chain-badge {{.order.Chain}}" id="chainBadge">
-                    {{if eq .order.Chain "wechat"}}微信支付{{else if eq .order.Chain "alipay"}}支付宝{{else}}{{.order.Chain}}{{end}}
+                    {{if eq .order.Chain "wechat"}}微信支付{{else if eq .order.Chain "alipay"}}支付宝{{end}}
                 </span>
             </div>
+            {{end}}
 
             <div class="countdown">
                 <div class="countdown-label" data-i18n="cashier.remainingTime">剩余支付时间</div>
@@ -351,7 +351,7 @@
             <!-- 微信/支付宝收款码 -->
             <div class="fiat-notice">
                 <p id="scanNotice">请使用{{if eq .order.Chain "wechat"}}微信{{else}}支付宝{{end}}扫码支付</p>
-                <p class="amount-highlight">¥{{.order.Money}}</p>
+                <p class="amount-highlight">¥{{.order.UniqueAmount}}</p>
             </div>
             <div class="qrcode-container">
                 <div class="qrcode" id="qrcode"></div>
@@ -363,7 +363,13 @@
             </div>
 
             <div class="address-container">
-                <div class="address-label" data-i18n="cashier.paymentAddress">收款地址 (请确认网络正确)</div>
+                <div class="address-label" style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+                    <span data-i18n="cashier.paymentAddress">收款地址 (请确认网络正确)</span>
+                    <div style="padding: 4px 10px; background: #f0f0f0; border-radius: 6px;">
+                        <span style="color: #666; font-size: 13px;">网络:</span>
+                        <span class="chain-badge {{.order.Chain}}" style="margin-left: 6px;">{{.order.Chain}}</span>
+                    </div>
+                </div>
                 <div class="address" id="address">{{.order.ToAddress}}</div>
                 <button class="copy-btn" onclick="copyAddress()" data-i18n="cashier.copyAddress">复制地址</button>
             </div>
@@ -380,7 +386,7 @@
             {{if and (ne .order.Chain "wechat") (ne .order.Chain "alipay")}}
             <div class="info-row">
                 <span class="info-label" data-i18n="cashier.exchangeRate">汇率</span>
-                <span class="info-value">1 {{if eq .order.Chain "trx"}}TRX{{else}}USDT{{end}} ≈ ¥{{.order.Rate}}</span>
+                <span class="info-value">1 {{if eq .order.Chain "trx"}}TRX{{else}}USDT{{end}} ≈ {{if eq .order.Currency "USD"}}${{else if eq .order.Currency "EUR"}}€{{else if eq .order.Currency "CNY"}}¥{{else}}{{.order.Currency}} {{end}}{{.order.Rate}}</span>
             </div>
             {{end}}
 
@@ -394,20 +400,20 @@
                 <ul id="tipsList">
                     {{if eq .order.Chain "wechat"}}
                     <li data-i18n="cashier.tips.wechat.scan">请使用微信扫描上方二维码</li>
-                    <li><span data-i18n="cashier.tips.wechat.amount">请转账精确金额</span> <strong>¥{{.order.Money}}</strong></li>
+                    <li><span data-i18n="cashier.tips.wechat.amount">请转账精确金额</span> <strong style="color: #c92a2a; font-size: 16px;">¥{{.order.UniqueAmount}}</strong></li>
                     <li data-i18n="cashier.tips.wechat.wait">转账完成后请耐心等待确认</li>
                     {{else if eq .order.Chain "alipay"}}
                     <li data-i18n="cashier.tips.alipay.scan">请使用支付宝扫描上方二维码</li>
-                    <li><span data-i18n="cashier.tips.alipay.amount">请转账精确金额</span> <strong>¥{{.order.Money}}</strong></li>
+                    <li><span data-i18n="cashier.tips.alipay.amount">请转账精确金额</span> <strong style="color: #c92a2a; font-size: 16px;">¥{{.order.UniqueAmount}}</strong></li>
                     <li data-i18n="cashier.tips.alipay.wait">转账完成后请耐心等待确认</li>
                     {{else if eq .order.Chain "trx"}}
                     <li><span data-i18n="cashier.tips.crypto.network">请务必确认转账网络为</span> <strong>Tron (TRX)</strong></li>
-                    <li><span data-i18n="cashier.tips.crypto.amount">请转账精确金额</span> <strong>{{.order.USDTAmount}} TRX</strong></li>
+                    <li><span data-i18n="cashier.tips.crypto.amount">请转账精确金额</span> <strong style="color: #c92a2a; font-size: 16px;">{{.order.UniqueAmount}} TRX</strong></li>
                     <li data-i18n="cashier.tips.crypto.exchangeFee" style="color: #e65100; font-weight: 500;">从交易所提币请将手续费加入转账金额，确保到账金额正确</li>
                     <li data-i18n="cashier.tips.crypto.wait">转账完成后请耐心等待确认</li>
                     {{else}}
                     <li><span data-i18n="cashier.tips.crypto.network">请务必确认转账网络为</span> <strong>{{.order.Chain}}</strong></li>
-                    <li><span data-i18n="cashier.tips.crypto.amount">请转账精确金额</span> <strong>{{.order.USDTAmount}} USDT</strong></li>
+                    <li><span data-i18n="cashier.tips.crypto.amount">请转账精确金额</span> <strong style="color: #c92a2a; font-size: 16px;">{{.order.UniqueAmount}} USDT</strong></li>
                     <li data-i18n="cashier.tips.crypto.exchangeFee" style="color: #e65100; font-weight: 500;">从交易所提币请将手续费加入转账金额，确保到账金额正确</li>
                     <li data-i18n="cashier.tips.crypto.wait">转账完成后请耐心等待确认</li>
                     {{end}}
@@ -487,18 +493,47 @@
 
         // 复制地址
         function copyAddress() {
-            navigator.clipboard.writeText(address).then(function() {
-                alert($t('cashier.addressCopied'));
-            }).catch(function() {
-                // 降级方案
-                const input = document.createElement('input');
-                input.value = address;
-                document.body.appendChild(input);
-                input.select();
+            const addressText = address || document.getElementById('address').textContent;
+
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(addressText).then(function() {
+                    showToast(window.I18n ? I18n.t('cashier.addressCopied') : '地址已复制');
+                }).catch(function(err) {
+                    console.error('Clipboard API failed:', err);
+                    fallbackCopy(addressText);
+                });
+            } else {
+                fallbackCopy(addressText);
+            }
+        }
+
+        function fallbackCopy(text) {
+            const input = document.createElement('input');
+            input.value = text;
+            input.style.position = 'fixed';
+            input.style.top = '0';
+            input.style.left = '-9999px';
+            document.body.appendChild(input);
+            input.select();
+            input.setSelectionRange(0, 99999);
+            try {
                 document.execCommand('copy');
-                document.body.removeChild(input);
-                alert($t('cashier.addressCopied'));
-            });
+                showToast(window.I18n ? I18n.t('cashier.addressCopied') : '地址已复制');
+            } catch (err) {
+                console.error('Copy failed:', err);
+                showToast('复制失败，请手动复制');
+            }
+            document.body.removeChild(input);
+        }
+
+        function showToast(message) {
+            const toast = document.createElement('div');
+            toast.textContent = message;
+            toast.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(0,0,0,0.8);color:white;padding:12px 24px;border-radius:8px;z-index:10000;font-size:14px;';
+            document.body.appendChild(toast);
+            setTimeout(function() {
+                document.body.removeChild(toast);
+            }, 2000);
         }
 
         // 倒计时

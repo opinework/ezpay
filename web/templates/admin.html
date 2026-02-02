@@ -6,7 +6,7 @@
     <title data-i18n-document-title="admin.title">EzPay 管理后台</title>
     <link rel="stylesheet" href="/static/css/fontawesome.min.css">
     <link rel="stylesheet" href="/static/css/i18n.css">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="/static/js/chart.min.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f7fa; }
@@ -110,6 +110,7 @@
                 <a class="menu-item" data-page="chains"><span class="menu-icon"><i class="fas fa-link"></i></span><span data-i18n="admin.chains">链监控</span></a>
                 <a class="menu-item" data-page="merchants"><span class="menu-icon"><i class="fas fa-store"></i></span><span data-i18n="admin.merchants">商户管理</span></a>
                 <a class="menu-item" data-page="wallets"><span class="menu-icon"><i class="fas fa-wallet"></i></span><span data-i18n="admin.wallets">钱包管理</span></a>
+                <a class="menu-item" data-page="exchange-rates"><span class="menu-icon"><i class="fas fa-exchange-alt"></i></span><span data-i18n="admin.exchangeRates">汇率管理</span></a>
                 <a class="menu-item" data-page="orders"><span class="menu-icon"><i class="fas fa-file-invoice"></i></span><span data-i18n="admin.orders">订单管理</span></a>
                 <a class="menu-item" data-page="api-logs"><span class="menu-icon"><i class="fas fa-history"></i></span><span data-i18n="admin.apiLogs">API日志</span></a>
                 <a class="menu-item" data-page="ip-blacklist"><span class="menu-icon"><i class="fas fa-ban"></i></span><span data-i18n="admin.ipBlacklist">IP黑名单</span></a>
@@ -138,16 +139,16 @@
                         <div class="value" id="todayOrders">0</div>
                     </div>
                     <div class="stat-card">
-                        <h3 data-i18n="dashboard.todayUSDT">今日收款(USDT)</h3>
-                        <div class="value" id="todayUSDT">0</div>
-                    </div>
-                    <div class="stat-card">
-                        <h3 data-i18n="dashboard.currentRate">当前汇率</h3>
-                        <div class="value" id="currentRate">0</div>
+                        <h3 data-i18n="dashboard.todayUSD">今日收款(USD)</h3>
+                        <div class="value" id="todayUSD">0</div>
                     </div>
                     <div class="stat-card">
                         <h3 data-i18n="dashboard.pendingOrders">待支付订单</h3>
                         <div class="value" id="pendingOrders">0</div>
+                    </div>
+                    <div class="stat-card">
+                        <h3 data-i18n="dashboard.availableChannels">支付链路</h3>
+                        <div class="value" id="availableChannels">0</div>
                     </div>
                 </div>
 
@@ -169,7 +170,7 @@
                                 <div style="height:250px;"><canvas id="ordersChart"></canvas></div>
                             </div>
                             <div>
-                                <h4 style="color:#666;font-size:14px;margin-bottom:12px;" data-i18n="dashboard.amountTrend">交易金额趋势 (CNY)</h4>
+                                <h4 style="color:#666;font-size:14px;margin-bottom:12px;" data-i18n="dashboard.amountTrend">交易金额趋势 (USD)</h4>
                                 <div style="height:250px;"><canvas id="amountChart"></canvas></div>
                             </div>
                         </div>
@@ -188,7 +189,7 @@
                                     <tr>
                                         <th data-i18n="dashboard.rank">排名</th>
                                         <th data-i18n="dashboard.merchant">商户</th>
-                                        <th data-i18n="dashboard.amount">交易金额(CNY)</th>
+                                        <th data-i18n="dashboard.amount">交易金额(USD)</th>
                                     </tr>
                                 </thead>
                                 <tbody id="topAmountTable"></tbody>
@@ -325,6 +326,52 @@
                 </div>
             </div>
 
+            <!-- Exchange Rates Page -->
+            <div class="page" id="page-exchange-rates">
+                <div class="card">
+                    <div class="card-header">
+                        <h2 data-i18n="admin.exchangeRates">汇率管理</h2>
+                        <div style="display:flex;gap:10px;">
+                            <button class="btn btn-sm" onclick="showFloatSettings()" data-i18n="adminPage.exchangeRates.floatSettings">浮动设置</button>
+                            <button class="btn btn-primary btn-sm" onclick="refreshAutoRates()" data-i18n="adminPage.exchangeRates.refreshAuto">刷新自动汇率</button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div style="margin-bottom:20px;padding:15px;background:#f8f9fa;border-radius:8px;">
+                            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;font-size:14px;">
+                                <div>
+                                    <strong data-i18n="adminPage.exchangeRates.buyFloat">买入浮动:</strong>
+                                    <span id="currentBuyFloat" style="color:#28a745;font-weight:bold;">--</span>
+                                    <span style="color:#666;font-size:12px;">（用户支付时加价）</span>
+                                </div>
+                                <div>
+                                    <strong data-i18n="adminPage.exchangeRates.sellFloat">卖出浮动:</strong>
+                                    <span id="currentSellFloat" style="color:#dc3545;font-weight:bold;">--</span>
+                                    <span style="color:#666;font-size:12px;">（提现时减价）</span>
+                                </div>
+                            </div>
+                        </div>
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th data-i18n="adminPage.exchangeRates.from">源货币</th>
+                                    <th data-i18n="adminPage.exchangeRates.to">目标货币</th>
+                                    <th data-i18n="adminPage.exchangeRates.baseRate">基础汇率</th>
+                                    <th data-i18n="adminPage.exchangeRates.buyRate">买入价</th>
+                                    <th data-i18n="adminPage.exchangeRates.sellRate">卖出价</th>
+                                    <th data-i18n="adminPage.exchangeRates.type">类型</th>
+                                    <th data-i18n="adminPage.exchangeRates.autoUpdate">自动更新</th>
+                                    <th data-i18n="adminPage.exchangeRates.lastUpdate">最后更新</th>
+                                    <th data-i18n="common.action">操作</th>
+                                </tr>
+                            </thead>
+                            <tbody id="exchangeRatesTable">
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
             <!-- Chains Page -->
             <div class="page" id="page-chains">
                 <div class="card">
@@ -412,20 +459,6 @@
                         <h2 data-i18n="settings.title">系统设置</h2>
                     </div>
                     <div class="card-body">
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label data-i18n="settings.rateMode">汇率模式</label>
-                                <select id="cfg_rate_mode" style="width:100%;padding:12px;border:1px solid #ddd;border-radius:8px;">
-                                    <option value="auto" data-i18n="settings.rateAuto">自动获取</option>
-                                    <option value="manual" data-i18n="settings.rateManual">手动设置</option>
-                                    <option value="hybrid" data-i18n="settings.rateHybrid">混合模式</option>
-                                </select>
-                            </div>
-                            <div class="form-group">
-                                <label data-i18n="settings.manualRate">手动汇率</label>
-                                <input type="text" id="cfg_manual_rate">
-                            </div>
-                        </div>
                         <div class="form-row">
                             <div class="form-group">
                                 <label data-i18n="settings.orderExpire">订单过期时间(分钟)</label>
@@ -713,6 +746,7 @@
                     if (page === 'orders') { loadOrderMerchantFilter(); loadOrders(); }
                     if (page === 'merchants') loadMerchants();
                     if (page === 'wallets') loadWallets();
+                    if (page === 'exchange-rates') loadExchangeRates();
                     if (page === 'chains') loadChains();
                     if (page === 'api-logs') loadAPILogs();
                     if (page === 'ip-blacklist') loadIPBlacklist();
@@ -751,14 +785,14 @@
         async function loadDashboard() {
             const data = await api('/admin/api/dashboard');
             if (data.code === 1) {
-                document.getElementById('todayOrders').textContent = data.data.stats.today_orders;
-                document.getElementById('todayUSDT').textContent = data.data.stats.today_usdt;
-                document.getElementById('currentRate').textContent = data.data.rate;
-                document.getElementById('pendingOrders').textContent = data.data.stats.pending_orders;
+                document.getElementById('todayOrders').textContent = data.data.stats.today_orders || 0;
+                document.getElementById('todayUSD').textContent = parseFloat(data.data.stats.today_usd || 0).toFixed(2);
+                document.getElementById('pendingOrders').textContent = data.data.stats.pending_orders || 0;
+                document.getElementById('availableChannels').textContent = data.data.stats.available_channels || 0;
 
-                let statusHtml = '<table><tr><th>链</th><th>类型</th><th>状态</th><th>账号数量</th></tr>';
+                let statusHtml = '<table><tr><th>链</th><th>币种类型</th><th>类型</th><th>状态</th><th>账号数量</th><th>核算货币</th></tr>';
                 const chainNames = {
-                    'trx': 'TRX (Tron原生)',
+                    'trx': 'TRX (Tron)',
                     'trc20': 'TRC20 (Tron USDT)',
                     'erc20': 'ERC20 (Ethereum)',
                     'bsc': 'BEP20 (BSC)',
@@ -768,15 +802,30 @@
                     'arbitrum': 'Arbitrum',
                     'avalanche': 'Avalanche',
                     'base': 'Base',
-                    'wechat': '微信支付',
-                    'alipay': '支付宝'
+                    'wechat': 'WeChat Pay',
+                    'alipay': 'Alipay'
+                };
+                const currencyTypes = {
+                    'trx': 'TRX',
+                    'trc20': 'USDT',
+                    'erc20': 'USDT',
+                    'bsc': 'USDT',
+                    'bep20': 'USDT',
+                    'polygon': 'USDT',
+                    'optimism': 'USDT',
+                    'arbitrum': 'USDT',
+                    'avalanche': 'USDT',
+                    'base': 'USDT',
+                    'wechat': 'CNY',
+                    'alipay': 'CNY'
                 };
                 for (const [chain, info] of Object.entries(data.data.blockchain)) {
                     const displayName = chainNames[chain] || chain.toUpperCase();
+                    const currencyType = currencyTypes[chain] || 'USDT';
                     const typeLabel = info.passive ? '<span class="badge" style="background:#9c27b0;color:white;">被动推送</span>' : '<span class="badge" style="background:#2196f3;color:white;">主动监控</span>';
                     const statusLabel = info.running ? '<span class="badge badge-success">运行中</span>' : '<span class="badge badge-danger">已停止</span>';
                     const walletCount = info.wallet_count || 0;
-                    statusHtml += `<tr><td>${displayName}</td><td>${typeLabel}</td><td>${statusLabel}</td><td>${walletCount}</td></tr>`;
+                    statusHtml += `<tr><td>${displayName}</td><td><span class="badge" style="background:#607d8b;color:white;">${currencyType}</span></td><td>${typeLabel}</td><td>${statusLabel}</td><td>${walletCount}</td><td><span class="badge" style="background:#4caf50;color:white;">USD</span></td></tr>`;
                 }
                 statusHtml += '</table>';
                 document.getElementById('blockchainStatus').innerHTML = statusHtml;
@@ -841,7 +890,7 @@
                 data: {
                     labels: data.labels,
                     datasets: [{
-                        label: '金额(CNY)',
+                        label: '金额(USD)',
                         data: data.amounts,
                         backgroundColor: 'rgba(16, 185, 129, 0.7)',
                         borderColor: '#10b981',
@@ -866,7 +915,7 @@
                     amountHtml += `<tr>
                         <td><span style="display:inline-block;width:24px;height:24px;border-radius:50%;background:${i < 3 ? '#667eea' : '#9ca3af'};color:white;text-align:center;line-height:24px;font-size:12px;">${i + 1}</span></td>
                         <td>${m.name || m.pid}</td>
-                        <td style="font-weight:600;color:#059669;">¥${m.amount.toFixed(2)}</td>
+                        <td style="font-weight:600;color:#059669;">$${(m.amount || 0).toFixed(2)}</td>
                     </tr>`;
                 });
                 document.getElementById('topAmountTable').innerHTML = amountHtml || '<tr><td colspan="3" style="text-align:center;color:#999;">暂无数据</td></tr>';
@@ -1029,8 +1078,16 @@
                     </select>
                 </div>
                 <div class="form-group">
-                    <label>金额(CNY)</label>
+                    <label>金额</label>
                     <input type="number" id="testMoney" value="10" step="0.01" min="0.01" style="width:100%;padding:12px;border:1px solid #ddd;border-radius:8px;">
+                </div>
+                <div class="form-group">
+                    <label>币种</label>
+                    <select id="testCurrency" style="width:100%;padding:12px;border:1px solid #ddd;border-radius:8px;">
+                        <option value="USD">USD (美元)</option>
+                        <option value="EUR">EUR (欧元)</option>
+                        <option value="CNY" selected>CNY (人民币)</option>
+                    </select>
                 </div>
                 <div class="form-group">
                     <label>商品名称(可选)</label>
@@ -1049,6 +1106,7 @@
             const merchantId = document.getElementById('testMerchant').value;
             const payType = document.getElementById('testPayType').value;
             const money = document.getElementById('testMoney').value;
+            const currency = document.getElementById('testCurrency').value;
             const name = document.getElementById('testName').value;
 
             if (!merchantId) {
@@ -1066,6 +1124,7 @@
                     merchant_id: parseInt(merchantId),
                     type: payType,
                     money: money,
+                    currency: currency,
                     name: name || '测试订单'
                 })
             });
@@ -1311,11 +1370,219 @@
             }
         }
 
+        // ==================== 汇率管理 ====================
+        async function loadExchangeRates() {
+            const data = await api('/admin/api/exchange-rates');
+            if (data.code === 1) {
+                // 更新浮动显示
+                const buyFloat = parseFloat(data.buy_float || 0) * 100;
+                const sellFloat = parseFloat(data.sell_float || 0) * 100;
+                document.getElementById('currentBuyFloat').textContent = `+${buyFloat.toFixed(2)}%`;
+                document.getElementById('currentSellFloat').textContent = `-${sellFloat.toFixed(2)}%`;
+
+                // 渲染汇率表格
+                const tbody = document.getElementById('exchangeRatesTable');
+                tbody.innerHTML = data.data.map(rate => `
+                    <tr>
+                        <td><strong>${rate.from_currency}</strong></td>
+                        <td><strong>${rate.to_currency}</strong></td>
+                        <td>${parseFloat(rate.rate).toFixed(8)}</td>
+                        <td style="color:#28a745;font-weight:bold;">${parseFloat(rate.buy_rate).toFixed(8)}</td>
+                        <td style="color:#dc3545;font-weight:bold;">${parseFloat(rate.sell_rate).toFixed(8)}</td>
+                        <td>
+                            <span class="badge ${rate.rate_type === 'auto' ? 'badge-success' : 'badge-secondary'}" data-i18n="adminPage.exchangeRates.${rate.rate_type}">
+                                ${rate.rate_type === 'auto' ? '自动' : '手动'}
+                            </span>
+                        </td>
+                        <td>
+                            <span class="badge ${rate.auto_update ? 'badge-success' : 'badge-secondary'}" data-i18n="adminPage.exchangeRates.${rate.auto_update ? 'enabled' : 'disabled'}">
+                                ${rate.auto_update ? '启用' : '禁用'}
+                            </span>
+                        </td>
+                        <td>${rate.last_updated ? new Date(rate.last_updated).toLocaleString() : '-'}</td>
+                        <td>
+                            <button class="btn btn-sm" onclick='editExchangeRate(${JSON.stringify(rate)})' data-i18n="adminPage.exchangeRates.edit">编辑</button>
+                        </td>
+                    </tr>
+                `).join('');
+
+                // 翻译新插入的内容
+                if (typeof I18n !== 'undefined') {
+                    I18n.translatePage();
+                }
+            }
+        }
+
+        function editExchangeRate(rate) {
+            document.getElementById('modalTitle').textContent = '编辑汇率';
+            document.getElementById('modalBody').innerHTML = `
+                <div class="form-group">
+                    <label>汇率对</label>
+                    <input type="text" value="${rate.from_currency} → ${rate.to_currency}" disabled style="width:100%;padding:12px;border:1px solid #ddd;border-radius:8px;background:#f5f5f5;">
+                </div>
+                <div class="form-group">
+                    <label>基础汇率（中间价）</label>
+                    <input type="number" id="editRate" value="${rate.rate}" step="0.00000001" min="0" style="width:100%;padding:12px;border:1px solid #ddd;border-radius:8px;">
+                </div>
+                <div class="form-group">
+                    <label>汇率类型</label>
+                    <select id="editRateType" style="width:100%;padding:12px;border:1px solid #ddd;border-radius:8px;">
+                        <option value="manual" ${rate.rate_type === 'manual' ? 'selected' : ''}>手动</option>
+                        <option value="auto" ${rate.rate_type === 'auto' ? 'selected' : ''}>自动</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label style="display:flex;align-items:center;gap:8px;">
+                        <input type="checkbox" id="editAutoUpdate" ${rate.auto_update ? 'checked' : ''} style="margin:0;">
+                        <span>启用自动更新</span>
+                    </label>
+                </div>
+                <div class="form-group">
+                    <label>数据源（自动模式）</label>
+                    <select id="editSource" style="width:100%;padding:12px;border:1px solid #ddd;border-radius:8px;">
+                        <option value="binance" ${rate.source === 'binance' ? 'selected' : ''}>Binance</option>
+                        <option value="okx" ${rate.source === 'okx' ? 'selected' : ''}>OKX</option>
+                    </select>
+                </div>
+                <div style="padding:10px;background:#f8f9fa;border-radius:6px;margin-top:15px;">
+                    <small style="color:#666;">
+                        <div><strong>当前浮动:</strong> 买入 +${(parseFloat(document.getElementById('currentBuyFloat').textContent)).toFixed(2)}%, 卖出 ${document.getElementById('currentSellFloat').textContent}</div>
+                        <div style="margin-top:5px;"><strong>买入价:</strong> ${parseFloat(rate.buy_rate).toFixed(8)}</div>
+                        <div><strong>卖出价:</strong> ${parseFloat(rate.sell_rate).toFixed(8)}</div>
+                    </small>
+                </div>
+                <div style="display:flex;gap:10px;margin-top:20px;">
+                    <button class="btn btn-primary" onclick="saveExchangeRate(${rate.id})">保存</button>
+                    <button class="btn" onclick="closeModal()">取消</button>
+                </div>
+            `;
+            document.getElementById('modal').classList.add('show');
+        }
+
+        async function saveExchangeRate(id) {
+            const rateValue = document.getElementById('editRate').value;
+            const rateType = document.getElementById('editRateType').value;
+            const autoUpdate = document.getElementById('editAutoUpdate').checked;
+            const source = document.getElementById('editSource').value;
+
+            if (!rateValue || parseFloat(rateValue) <= 0) {
+                alert('请输入有效的汇率');
+                return;
+            }
+
+            const data = await api(`/admin/api/exchange-rates/${id}`, {
+                method: 'PUT',
+                body: JSON.stringify({
+                    rate: rateValue,
+                    rate_type: rateType,
+                    auto_update: autoUpdate,
+                    source: source
+                })
+            });
+
+            if (data.code === 1) {
+                closeModal();
+                loadExchangeRates();
+                showToast('汇率更新成功');
+            } else {
+                alert(data.msg || '更新失败');
+            }
+        }
+
+        async function showFloatSettings() {
+            document.getElementById('modalTitle').textContent = '浮动设置';
+            const buyFloat = parseFloat(document.getElementById('currentBuyFloat').textContent.replace('+', '').replace('%', ''));
+            const sellFloat = parseFloat(document.getElementById('currentSellFloat').textContent.replace('-', '').replace('%', ''));
+
+            // 获取当前自动更新状态
+            const settingsData = await api('/admin/api/exchange-rates/float');
+            const autoUpdate = settingsData.code === 1 ? settingsData.auto_update : true;
+
+            document.getElementById('modalBody').innerHTML = `
+                <div class="form-group">
+                    <label>买入浮动（用户支付时加价）</label>
+                    <div style="display:flex;align-items:center;gap:10px;">
+                        <input type="number" id="editBuyFloat" value="${(buyFloat / 100).toFixed(4)}" step="0.0001" min="0" max="1" style="flex:1;padding:12px;border:1px solid #ddd;border-radius:8px;">
+                        <span style="font-weight:bold;color:#28a745;">(+${buyFloat.toFixed(2)}%)</span>
+                    </div>
+                    <small style="color:#666;">例如: 0.02 表示 +2%，用户支付时多收 2%</small>
+                </div>
+                <div class="form-group" style="margin-top:20px;">
+                    <label>卖出浮动（提现时减价）</label>
+                    <div style="display:flex;align-items:center;gap:10px;">
+                        <input type="number" id="editSellFloat" value="${(sellFloat / 100).toFixed(4)}" step="0.0001" min="0" max="1" style="flex:1;padding:12px;border:1px solid #ddd;border-radius:8px;">
+                        <span style="font-weight:bold;color:#dc3545;">(-${sellFloat.toFixed(2)}%)</span>
+                    </div>
+                    <small style="color:#666;">例如: 0.02 表示 -2%，提现时少给 2%</small>
+                </div>
+                <div class="form-group" style="margin-top:20px;">
+                    <label style="display:flex;align-items:center;gap:10px;cursor:pointer;">
+                        <input type="checkbox" id="editAutoUpdate" ${autoUpdate ? 'checked' : ''} style="width:20px;height:20px;">
+                        <span>启用汇率自动更新（每小时）</span>
+                    </label>
+                    <small style="color:#666;">启用后系统将每小时自动从数据源获取最新汇率</small>
+                </div>
+                <div style="padding:15px;background:#fff3cd;border-left:4px solid #ffc107;margin-top:20px;border-radius:4px;">
+                    <strong>💡 价差利润 = 买入浮动 + 卖出浮动</strong><br>
+                    <small>当前设置: +${buyFloat.toFixed(2)}% + ${sellFloat.toFixed(2)}% = <strong>${(buyFloat + sellFloat).toFixed(2)}%</strong></small>
+                </div>
+                <div style="display:flex;gap:10px;margin-top:20px;">
+                    <button class="btn btn-primary" onclick="saveFloatSettings()">保存</button>
+                    <button class="btn" onclick="closeModal()">取消</button>
+                </div>
+            `;
+            document.getElementById('modal').classList.add('show');
+        }
+
+        async function saveFloatSettings() {
+            const buyFloat = document.getElementById('editBuyFloat').value;
+            const sellFloat = document.getElementById('editSellFloat').value;
+            const autoUpdate = document.getElementById('editAutoUpdate').checked;
+
+            if (!buyFloat || !sellFloat || parseFloat(buyFloat) < 0 || parseFloat(sellFloat) < 0) {
+                alert('请输入有效的浮动值');
+                return;
+            }
+
+            const data = await api('/admin/api/exchange-rates/float', {
+                method: 'POST',
+                body: JSON.stringify({
+                    buy_float: buyFloat,
+                    sell_float: sellFloat,
+                    auto_update: autoUpdate
+                })
+            });
+
+            if (data.code === 1) {
+                closeModal();
+                loadExchangeRates();
+                showToast('浮动设置更新成功' + (autoUpdate ? '，自动更新已启用' : '，自动更新已禁用'));
+            } else {
+                alert(data.msg || '更新失败');
+            }
+        }
+
+        async function refreshAutoRates() {
+            if (!confirm('确定要刷新所有启用自动更新的汇率吗？')) {
+                return;
+            }
+
+            const data = await api('/admin/api/exchange-rates/refresh', {
+                method: 'POST'
+            });
+
+            if (data.code === 1) {
+                showToast(`刷新完成，成功更新 ${data.count}/${data.total} 个汇率`);
+                loadExchangeRates();
+            } else {
+                alert(data.msg || '刷新失败');
+            }
+        }
+
         async function loadSettings() {
             const data = await api('/admin/api/configs');
             if (data.code === 1) {
                 document.getElementById('cfg_rate_mode').value = data.data.rate_mode || 'hybrid';
-                document.getElementById('cfg_manual_rate').value = data.data.manual_rate || '7.2';
                 document.getElementById('cfg_order_expire').value = data.data.order_expire || '30';
                 document.getElementById('cfg_notify_retry').value = data.data.notify_retry || '5';
                 document.getElementById('cfg_system_wallet_fee_rate').value = data.data.system_wallet_fee_rate || '0.02';
@@ -1330,7 +1597,6 @@
         async function saveSettings() {
             const settings = {
                 rate_mode: document.getElementById('cfg_rate_mode').value,
-                manual_rate: document.getElementById('cfg_manual_rate').value,
                 order_expire: document.getElementById('cfg_order_expire').value,
                 notify_retry: document.getElementById('cfg_notify_retry').value,
                 system_wallet_fee_rate: document.getElementById('cfg_system_wallet_fee_rate').value,
@@ -1403,7 +1669,7 @@
                 <div class="form-group">
                     <label>类型</label>
                     <select id="walletChain" style="width:100%;padding:12px;border:1px solid #ddd;border-radius:8px;" onchange="onChainChange()">
-                        <option value="trx">TRX (Tron原生)</option>
+                        <option value="trx">TRX (Tron)</option>
                         <option value="trc20">TRC20 (Tron USDT)</option>
                         <option value="erc20">ERC20 (Ethereum)</option>
                         <option value="bep20">BEP20 (BSC)</option>
@@ -1532,7 +1798,7 @@
 
         // Chain management
         const chainNames = {
-            'trx': 'TRX (Tron原生)',
+            'trx': 'TRX (Tron)',
             'trc20': 'TRC20 (Tron)',
             'erc20': 'ERC20 (Ethereum)',
             'bep20': 'BEP20 (BSC)',
@@ -2309,6 +2575,9 @@
             if (activePage) {
                 updatePageTitleI18n(activePage.dataset.page);
             }
+            // 重新创建语言选择器以更新显示的语言名称
+            I18n.createLanguageSelector('headerLangSelector', 'light');
+            I18n.createLanguageSelector('loginLangSelector', 'light');
         });
     </script>
 </body>

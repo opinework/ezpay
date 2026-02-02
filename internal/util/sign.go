@@ -3,17 +3,26 @@ package util
 import (
 	"crypto/md5"
 	"encoding/hex"
+	"log"
 	"net/url"
 	"sort"
 	"strings"
 )
 
+// RFC3986Encode 按 RFC 3986 规范进行 URL 编码（空格 → %20）
+func RFC3986Encode(s string) string {
+	// url.QueryEscape 会把空格编码为 +，需要替换为 %20
+	encoded := url.QueryEscape(s)
+	return strings.ReplaceAll(encoded, "+", "%20")
+}
+
 // GenerateSign 生成签名 (彩虹易支付兼容)
 // 签名算法:
 // 1. 将参数按ASCII码排序
-// 2. 拼接为 key1=value1&key2=value2 格式
-// 3. 末尾追加商户密钥
-// 4. MD5加密(小写)
+// 2. 对参数值按 RFC 3986 规范进行 URL 编码
+// 3. 拼接为 key1=urlencode(value1)&key2=urlencode(value2) 格式
+// 4. 末尾追加商户密钥
+// 5. MD5加密(小写)
 func GenerateSign(params map[string]string, key string) string {
 	// 排除空值和签名相关参数
 	filtered := make(map[string]string)
@@ -31,7 +40,7 @@ func GenerateSign(params map[string]string, key string) string {
 	}
 	sort.Strings(keys)
 
-	// 拼接字符串
+	// 拼接字符串（参数值使用 RFC 3986 URL 编码）
 	var builder strings.Builder
 	for i, k := range keys {
 		if i > 0 {
@@ -39,12 +48,19 @@ func GenerateSign(params map[string]string, key string) string {
 		}
 		builder.WriteString(k)
 		builder.WriteString("=")
-		builder.WriteString(filtered[k])
+		builder.WriteString(RFC3986Encode(filtered[k]))
 	}
 	builder.WriteString(key)
 
-	// MD5加密
-	return MD5(builder.String())
+	signStr := builder.String()
+	result := MD5(signStr)
+
+	// 调试日志
+	log.Printf("[GenerateSign] 过滤后的keys: %v", keys)
+	log.Printf("[GenerateSign] 签名字符串: %s", signStr)
+	log.Printf("[GenerateSign] MD5结果: %s", result)
+
+	return result
 }
 
 // VerifySign 验证签名

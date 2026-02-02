@@ -12,9 +12,50 @@
 
 ```sql
 CREATE DATABASE ezpay CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER 'ezpay'@'localhost' IDENTIFIED BY 'your_password';
+GRANT ALL PRIVILEGES ON ezpay.* TO 'ezpay'@'localhost';
+FLUSH PRIVILEGES;
 ```
 
-### 2. 获取可执行文件
+### 2. 初始化数据库结构
+
+EzPay 使用版本化数据库迁移系统管理数据库结构。
+
+#### 首次部署
+
+```bash
+# 执行数据库迁移（自动创建所有表）
+./db/migrate.sh migrate
+```
+
+迁移工具会：
+- ✅ 自动创建版本管理表
+- ✅ 应用 V001 初始化数据库结构
+- ✅ 自动备份（可回滚）
+- ✅ 记录迁移历史
+
+#### 升级现有数据库
+
+```bash
+# 查看待执行的迁移
+./db/migrate.sh status
+
+# 执行迁移更新
+./db/migrate.sh migrate
+```
+
+#### 查看迁移历史
+
+```bash
+./db/migrate.sh history
+```
+
+**⚠️ 注意**：
+- 数据库结构由迁移系统管理，**不要**手动修改表结构
+- 新增字段请创建新的迁移文件（参考 `db/migrations/README.md`）
+- 生产环境迁移前请先在测试环境验证
+
+### 3. 获取可执行文件
 
 #### 方式一：下载预编译版本
 
@@ -105,9 +146,14 @@ log:
 
 # 汇率配置
 rate:
-  mode: "hybrid"             # auto/manual/hybrid
-  manual_rate: 7.2
-  cache_seconds: 300
+  auto_update_enabled: true  # 启用自动更新
+  update_interval: 60        # 更新间隔(分钟)
+  source: "binance"          # 主数据源: binance/okx
+  fallback_source: "okx"     # 备用数据源
+  cny_api: "https://api.exchangerate-api.com/v4/latest/USD"  # CNY汇率API
+  cache_seconds: 300         # 缓存时间
+  buy_float: 0.02            # 买入浮动 2%
+  sell_float: 0.02           # 卖出浮动 2%
 
 # 区块链监控 (完整配置见 config.yaml)
 blockchain:
@@ -127,11 +173,22 @@ blockchain:
 
 > 管理员账号和 Telegram 配置在管理后台"系统设置"中配置，不在配置文件中。
 
-### 4. 运行
+### 4. 启动服务
+
+**⚠️ 重要**: 启动前请确保已执行数据库迁移（参考步骤2）
 
 ```bash
+# 前台运行（测试）
 ./ezpay
+
+# 或后台运行
+nohup ./ezpay > ezpay.log 2>&1 &
 ```
+
+**说明**：
+- 服务**不会**自动创建数据库表
+- 数据库结构由迁移系统管理（`./db/migrate.sh`）
+- 首次部署必须先执行数据库迁移
 
 ### 5. 配置管理后台
 
@@ -432,3 +489,255 @@ CMD ["./ezpay"]
 
 - 检查网络是否可访问 Binance/OKX API
 - 可切换为手动汇率模式
+
+## 区块链监控优化配置
+
+### RPC 节点配置（推荐）
+
+为了提高稳定性，建议配置多个 RPC 节点：
+
+#### 以太坊 (ERC20)
+```yaml
+blockchain:
+  erc20:
+    enabled: true
+    rpc: https://eth-mainnet.g.alchemy.com/v2/YOUR_KEY
+    # 未来版本将支持多节点配置
+    confirmations: 12
+    scan_interval: 15
+```
+
+**推荐 RPC 提供商:**
+- Alchemy: https://www.alchemy.com/
+- Infura: https://www.infura.io/
+- QuickNode: https://www.quicknode.com/
+
+#### Tron (TRX/TRC20)
+```yaml
+blockchain:
+  trx:
+    enabled: true
+    rpc: https://api.trongrid.io
+    confirmations: 19
+    scan_interval: 15
+    
+  trc20:
+    enabled: true
+    rpc: https://api.trongrid.io
+    contract_address: "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t"
+    confirmations: 19
+    scan_interval: 15
+```
+
+**备用 TronGrid 节点:**
+- https://api.tronstack.io
+- https://api.shasta.trongrid.io (测试网)
+
+### 监控指标接入
+
+#### 1. 日志监控
+
+```bash
+# 实时监控扫描日志
+tail -f /var/log/ezpay/ezpay.log | grep -E "\[(trx|erc20|bep20)\]"
+
+# 监控告警
+tail -f /var/log/ezpay/ezpay.log | grep "ALERT"
+
+# 监控 RPC 重试
+tail -f /var/log/ezpay/ezpay.log | grep "retrying"
+```
+
+#### 2. API 监控
+
+创建监控脚本 `/usr/local/bin/ezpay-monitor.sh`:
+
+```bash
+#!/bin/bash
+
+# 获取监控指标
+METRICS=$(curl -s http://localhost:6088/admin/api/blockchain/metrics)
+
+# 解析成功率
+SUCCESS_RATE=$(echo $METRICS | jq -r '.success_rate.trx')
+
+# 检查告警
+if (( $(echo "$SUCCESS_RATE < 90" | bc -l) )); then
+    echo "ALERT: TRX scan success rate: $SUCCESS_RATE%"
+    # 发送告警通知
+fi
+```
+
+添加到 crontab:
+```bash
+# 每 5 分钟检查一次
+*/5 * * * * /usr/local/bin/ezpay-monitor.sh
+```
+
+#### 3. Prometheus 集成（未来）
+
+监控端点（计划中）:
+```
+GET /metrics
+```
+
+### 性能调优
+
+#### 1. 扫描间隔优化
+
+根据交易量调整：
+
+```yaml
+# 高频交易（如交易所）
+scan_interval: 5
+
+# 中等频率（如商户）
+scan_interval: 15
+
+# 低频率（如个人）
+scan_interval: 30
+```
+
+#### 2. 确认数调整
+
+根据安全需求调整：
+
+```yaml
+# 高安全（大额交易）
+confirmations: 20
+
+# 平衡（推荐）
+confirmations: 12
+
+# 快速（小额交易）
+confirmations: 3
+```
+
+⚠️ **警告**: 确认数过低可能导致重组风险
+
+#### 3. 数据库优化
+
+```sql
+-- 为交易日志添加索引
+CREATE INDEX idx_tx_hash ON transaction_logs(tx_hash);
+CREATE INDEX idx_chain_status ON transaction_logs(chain, matched);
+CREATE INDEX idx_created_at ON transaction_logs(created_at);
+
+-- 定期清理旧日志（可选）
+DELETE FROM transaction_logs WHERE created_at < DATE_SUB(NOW(), INTERVAL 30 DAY);
+```
+
+### 故障排查
+
+#### 问题 1: RPC 调用失败率高
+
+**症状:**
+```log
+[trx] RPC POST failed (attempt 3/3): context deadline exceeded
+⚠️  ALERT: Chain trx RPC failure rate: 35.2%
+```
+
+**排查步骤:**
+1. 检查网络连接: `ping api.trongrid.io`
+2. 测试 RPC: `curl https://api.trongrid.io/wallet/getnowblock`
+3. 检查防火墙规则
+4. 考虑更换 RPC 提供商
+
+**解决方案:**
+- 配置备用 RPC 节点（未来版本）
+- 增加超时时间（修改 httpClient.Timeout）
+- 使用付费 RPC 服务
+
+#### 问题 2: 区块落后严重
+
+**症状:**
+```log
+⚠️  ALERT: Chain erc20 is 150 blocks behind
+```
+
+**排查步骤:**
+1. 检查服务器性能: `top`, `htop`
+2. 检查数据库性能: `SHOW PROCESSLIST;`
+3. 查看监控指标: 扫描耗时
+
+**解决方案:**
+- 减小 scan_interval
+- 增加服务器资源
+- 优化数据库索引
+
+#### 问题 3: 交易遗漏
+
+**症状:** 用户支付后订单长时间未更新
+
+**排查步骤:**
+1. 检查链是否启用: `/admin/api/chains`
+2. 检查地址格式: 特别是 Tron 地址
+3. 查看重复交易: `duplicate_tx` 指标
+4. 检查确认数设置
+
+**解决方案:**
+- 核对收款地址格式（Tron 需要 T 开头）
+- 降低确认数（谨慎操作）
+- 检查钱包是否启用
+
+#### 问题 4: 重组频繁
+
+**症状:**
+```log
+[polygon] Potential reorg detected: current=45678, last=45679
+```
+
+**排查步骤:**
+1. 确认使用的是主网还是测试网
+2. 检查 RPC 节点是否稳定
+3. 查看网络区块重组历史
+
+**解决方案:**
+- 增加 confirmations
+- 使用更稳定的 RPC 节点
+- 考虑切换到主网
+
+### 监控仪表板
+
+推荐使用 Grafana + Prometheus 构建监控仪表板（未来版本将内置支持）
+
+**关键指标:**
+- 扫描成功率（目标 > 95%）
+- RPC 成功率（目标 > 98%）
+- 平均扫描延迟（目标 < 2s）
+- 区块落后数（目标 < 10）
+- 订单匹配率（目标 > 99%）
+
+### 升级指南
+
+从旧版本升级到新版本：
+
+```bash
+# 1. 备份数据库
+mysqldump -u root -p ezpay > ezpay_backup_$(date +%Y%m%d).sql
+
+# 2. 停止服务
+systemctl stop ezpay
+
+# 3. 备份旧版本
+cp /usr/bin/ezpay /usr/bin/ezpay.bak
+
+# 4. 部署新版本
+cp ezpay-improved /usr/bin/ezpay
+chmod +x /usr/bin/ezpay
+
+# 5. 启动服务
+systemctl start ezpay
+
+# 6. 查看日志确认
+journalctl -u ezpay -f
+```
+
+查看新功能是否正常:
+```bash
+# 检查监控指标
+curl http://localhost:6088/admin/api/blockchain/metrics
+
+# 应该看到新的指标字段
+```
+

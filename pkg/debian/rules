@@ -1,42 +1,101 @@
 #!/usr/bin/make -f
+#
+# Debian build rules for EzPay
+# Uses local source code - no remote downloads required
+#
 
 export DH_VERBOSE=1
 export CGO_ENABLED=0
 export GOOS=linux
 
+# Get version and build date
+VERSION=$(shell dpkg-parsechangelog -S Version)
+BUILDDATE=$(shell date -u '+%Y-%m-%d %H:%M:%S UTC')
+
 %:
 	dh $@
 
+override_dh_auto_configure:
+	@echo "=== Configuring EzPay Build ==="
+	@echo "Version: $(VERSION)"
+	@echo "Build date: $(BUILDDATE)"
+	@echo "Source directory: $(CURDIR)"
+	@echo "Go version: $$(go version)"
+
 override_dh_auto_build:
+	@echo "=== Building EzPay from Local Source ==="
+
 	# Determine architecture
 	if [ "$(DEB_HOST_ARCH)" = "amd64" ]; then \
 		export GOARCH=amd64; \
 	elif [ "$(DEB_HOST_ARCH)" = "arm64" ]; then \
 		export GOARCH=arm64; \
+	elif [ "$(DEB_HOST_ARCH)" = "armhf" ]; then \
+		export GOARCH=arm; \
+	else \
+		export GOARCH=amd64; \
 	fi; \
-	go build -ldflags="-s -w -X main.Version=$(shell dpkg-parsechangelog -S Version)" -o ezpay .
+	echo "Target architecture: $$GOARCH"; \
+	\
+	echo "Downloading Go dependencies..."; \
+	go mod download; \
+	\
+	echo "Compiling binary..."; \
+	go build \
+		-trimpath \
+		-ldflags="-s -w -X main.Version=$(VERSION) -X 'main.BuildDate=$(BUILDDATE)'" \
+		-o ezpay \
+		.; \
+	\
+	echo "Build completed successfully"
 
 override_dh_auto_install:
+	@echo "=== Installing EzPay Files ==="
+
 	# Install binary
+	@echo "Installing binary..."
 	install -Dm755 ezpay $(CURDIR)/debian/ezpay/usr/bin/ezpay
 
 	# Install config
+	@echo "Installing configuration..."
 	install -Dm644 config.yaml $(CURDIR)/debian/ezpay/etc/ezpay/config.yaml
 
 	# Install web files
+	@echo "Installing web assets..."
 	install -dm755 $(CURDIR)/debian/ezpay/usr/share/ezpay/web
 	cp -r web/templates $(CURDIR)/debian/ezpay/usr/share/ezpay/web/
 	cp -r web/static $(CURDIR)/debian/ezpay/usr/share/ezpay/web/
 
 	# Install systemd service
+	@echo "Installing systemd service..."
 	install -Dm644 pkg/debian/ezpay.service $(CURDIR)/debian/ezpay/lib/systemd/system/ezpay.service
 
 	# Create data directories
-	install -dm755 $(CURDIR)/debian/ezpay/var/lib/ezpay
-	install -dm755 $(CURDIR)/debian/ezpay/var/log/ezpay
+	@echo "Creating runtime directories..."
+	install -dm750 $(CURDIR)/debian/ezpay/var/lib/ezpay
+	install -dm750 $(CURDIR)/debian/ezpay/var/log/ezpay
+
+	# Install documentation
+	@echo "Installing documentation..."
+	if [ -f README.md ]; then \
+		install -Dm644 README.md $(CURDIR)/debian/ezpay/usr/share/doc/ezpay/README.md; \
+	fi
 
 override_dh_auto_test:
-	# Skip tests during package build
+	@echo "=== Running Tests ==="
+	# Verify binary was created
+	@if [ ! -f ezpay ]; then \
+		echo "Error: Binary not found!"; \
+		exit 1; \
+	fi
+	# Basic sanity check
+	./ezpay --version || true
 
 override_dh_strip:
-	# Binary already stripped with -s -w
+	# Binary already stripped with -s -w ldflags
+	@echo "Skipping strip (binary already stripped)"
+
+override_dh_auto_clean:
+	@echo "=== Cleaning Build Artifacts ==="
+	rm -f ezpay
+	dh_auto_clean

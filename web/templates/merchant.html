@@ -8,7 +8,7 @@
     <script src="/static/js/tailwind.min.js"></script>
     <script src="/static/js/vue.global.prod.js"></script>
     <script src="/static/js/axios.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="/static/js/chart.min.js"></script>
     <script src="/static/js/i18n.js?v=4"></script>
     <link href="/static/css/remixicon.css" rel="stylesheet">
     <style>
@@ -106,7 +106,7 @@
                         </div>
                         <div class="bg-white p-6 rounded-lg shadow">
                             <div class="text-gray-500 text-sm" data-i18n="merchantPage.dashboard.todayAmount">今日金额</div>
-                            <div class="text-3xl font-bold text-green-600">¥[[ (dashboard.today?.amount || 0).toFixed(2) ]]</div>
+                            <div class="text-3xl font-bold text-green-600">$[[ (dashboard.today?.amount || 0).toFixed(2) ]]</div>
                         </div>
                         <div class="bg-white p-6 rounded-lg shadow">
                             <div class="text-gray-500 text-sm" data-i18n="merchantPage.dashboard.totalOrders">累计订单</div>
@@ -114,7 +114,7 @@
                         </div>
                         <div class="bg-white p-6 rounded-lg shadow">
                             <div class="text-gray-500 text-sm" data-i18n="merchantPage.dashboard.totalAmount">累计金额</div>
-                            <div class="text-3xl font-bold text-orange-600">¥[[ (dashboard.total?.amount || 0).toFixed(2) ]]</div>
+                            <div class="text-3xl font-bold text-orange-600">$[[ (dashboard.total?.amount || 0).toFixed(2) ]]</div>
                         </div>
                     </div>
 
@@ -141,7 +141,7 @@
                             </div>
                             <!-- 金额趋势 -->
                             <div>
-                                <h4 class="text-sm font-medium text-gray-500 mb-3" data-i18n="dashboard.amountTrend">交易金额趋势 (CNY)</h4>
+                                <h4 class="text-sm font-medium text-gray-500 mb-3" data-i18n="dashboard.amountTrend">交易金额趋势 (USD)</h4>
                                 <div class="h-64 relative">
                                     <canvas ref="amountChart"></canvas>
                                 </div>
@@ -199,7 +199,7 @@
                                             [[ getPaymentTypeName(order.type || order.chain) ]]
                                         </span>
                                     </td>
-                                    <td class="px-4 py-3 text-sm">¥[[ order.money ]]</td>
+                                    <td class="px-4 py-3 text-sm">[[ getCurrencySymbol(order.currency) ]][[ order.money ]]</td>
                                     <td class="px-4 py-3 text-sm">[[ getReceivedAmount(order) ]]</td>
                                     <td class="px-4 py-3">
                                         <span class="px-2 py-1 rounded text-xs" :class="getStatusClass(order.status)">
@@ -961,7 +961,15 @@
                         </select>
                     </div>
                     <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-1">金额(CNY)</label>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">产品货币</label>
+                        <select v-model="testPayment.currency" class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <option value="USD">USD - 美元</option>
+                            <option value="EUR">EUR - 欧元</option>
+                            <option value="CNY">CNY - 人民币</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">金额([[ testPayment.currency ]])</label>
                         <input v-model="testPayment.money" type="number" step="0.01" min="0.01"
                             class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                             placeholder="10">
@@ -1053,7 +1061,7 @@
 
             // 测试支付相关
             const showTestPaymentModal = ref(false);
-            const testPayment = reactive({ type: 'usdt_trc20', money: '10', name: '' });
+            const testPayment = reactive({ type: 'usdt_trc20', money: '10', name: '', currency: 'USD' });
 
             // 计算属性：已审核通过的地址
             const approvedAddresses = computed(() => {
@@ -1191,7 +1199,7 @@
                         data: {
                             labels: data.labels,
                             datasets: [{
-                                label: '金额(CNY)',
+                                label: '金额(USD)',
                                 data: data.amounts,
                                 backgroundColor: 'rgba(16, 185, 129, 0.7)',
                                 borderColor: '#10b981',
@@ -1245,7 +1253,8 @@
                     const res = await api.post('/orders/test', {
                         type: testPayment.type,
                         money: testPayment.money,
-                        name: testPayment.name || '测试订单'
+                        name: testPayment.name || '测试订单',
+                        currency: testPayment.currency
                     });
                     if (res.data.code === 1) {
                         showTestPaymentModal.value = false;
@@ -1682,7 +1691,23 @@
                 return names[type] || (type ? type.toUpperCase() : '-');
             };
 
+            // 根据货币类型返回货币符号
+            const getCurrencySymbol = (currency) => {
+                const symbols = {
+                    'USD': '$',
+                    'EUR': '€',
+                    'CNY': '¥'
+                };
+                return symbols[currency] || '$';
+            };
+
+            // 获取实际支付金额（使用 pay_amount 和 pay_currency）
             const getReceivedAmount = (order) => {
+                // 优先使用新字段
+                if (order.pay_amount && order.pay_currency) {
+                    return `${order.pay_amount} ${order.pay_currency}`;
+                }
+                // 兼容旧数据
                 const type = order.type || order.chain;
                 if (type === 'wechat' || type === 'alipay') {
                     return `¥${order.money}`;
@@ -1737,7 +1762,7 @@
                 loadBalance, loadWithdrawals, submitWithdraw, loadRechargeAddresses,
                 loadWalletMode, saveWalletMode,
                 loadWithdrawAddresses, saveWithdrawAddress, setDefaultAddress, deleteWithdrawAddress,
-                getStatusClass, getStatusText, getChainClass, getPaymentTypeName, getReceivedAmount, formatTime,
+                getStatusClass, getStatusText, getChainClass, getPaymentTypeName, getCurrencySymbol, getReceivedAmount, formatTime,
                 getWithdrawStatusClass, getWithdrawStatusText,
                 getAddressChainName, getAddressStatusClass, getAddressStatusText
             };
@@ -1752,6 +1777,12 @@
     I18n.init().then(() => {
         I18n.createLanguageSelector('loginLangSelector', 'light');
         I18n.createLanguageSelector('mainLangSelector', 'light');
+    });
+
+    // 监听语言变化，重新创建语言选择器
+    window.addEventListener('localeChanged', function() {
+        I18n.createLanguageSelector('mainLangSelector', 'light');
+        I18n.createLanguageSelector('loginLangSelector', 'light');
     });
     </script>
 </body>

@@ -104,11 +104,13 @@ type ChainConfig struct {
 }
 
 type RateConfig struct {
-	Mode          string  `mapstructure:"mode"` // auto, manual, hybrid
-	ManualRate    float64 `mapstructure:"manual_rate"`
-	FloatPercent  float64 `mapstructure:"float_percent"`
-	CacheSeconds  int     `mapstructure:"cache_seconds"`
-	Source        string  `mapstructure:"source"` // binance, okx
+	AutoUpdateEnabled bool   `mapstructure:"auto_update_enabled"` // 是否启用自动更新
+	UpdateInterval    int    `mapstructure:"update_interval"`     // 自动更新间隔(分钟)
+	Source            string `mapstructure:"source"`              // 主数据源: binance, okx, custom
+	FallbackSource    string `mapstructure:"fallback_source"`     // 备用数据源
+	CustomAPI         string `mapstructure:"custom_api"`          // 自定义API地址
+	CnyAPI            string `mapstructure:"cny_api"`             // CNY汇率专用API地址
+	CacheSeconds      int    `mapstructure:"cache_seconds"`       // 汇率缓存时间(秒)
 }
 
 var cfg *Config
@@ -293,6 +295,7 @@ func setDefaults() {
 	viper.SetDefault("rate.float_percent", 0)
 	viper.SetDefault("rate.cache_seconds", 300)
 	viper.SetDefault("rate.source", "binance")
+	viper.SetDefault("rate.cny_api", "https://api.exchangerate-api.com/v4/latest/USD")
 }
 
 func createDefaultConfig() error {

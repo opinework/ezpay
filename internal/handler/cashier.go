@@ -96,14 +96,16 @@ func (h *CashierHandler) GetOrderInfo(c *gin.Context) {
 	}
 
 	result := gin.H{
-		"code":        1,
-		"trade_no":    order.TradeNo,
-		"status":      order.Status,
-		"money":       order.Money.String(),
-		"usdt_amount": order.USDTAmount.String(),
-		"address":     order.ToAddress,
-		"chain":       order.Chain,
-		"expired_at":  order.ExpiredAt,
+		"code":          1,
+		"trade_no":      order.TradeNo,
+		"status":        order.Status,
+		"money":         order.Money.String(),
+		"pay_amount":    order.PayAmount.String(),    // 展示金额（无偏移）
+		"unique_amount": order.UniqueAmount.String(), // 唯一标识金额（含偏移，实际支付）
+		"usdt_amount":   order.UniqueAmount.String(), // 兼容旧字段
+		"address":       order.ToAddress,
+		"chain":         order.Chain,
+		"expired_at":    order.ExpiredAt,
 	}
 
 	// 如果已支付，返回返回URL

@@ -17,10 +17,11 @@ NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
-ReadWritePaths=/var/lib/ezpay /var/log/ezpay /usr/share/ezpay/web/static/uploads
+ReadWritePaths=/var/lib/ezpay /var/log/ezpay
 
 # Environment
 Environment=GIN_MODE=release
+Environment=EZPAY_DATA_DIR=/var/lib/ezpay
 
 [Install]
 WantedBy=multi-user.target

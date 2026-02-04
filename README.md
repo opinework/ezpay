@@ -397,12 +397,15 @@ curl -s "http://localhost:6088/health/detail"
 
 | 文档 | 说明 |
 |------|------|
-| [用户手册](./docs/USER_GUIDE.md) | 管理员和商户操作指南 |
-| [构建指南](./docs/BUILD.md) | 开发/生产模式，跨平台编译 |
-| [部署指南](./docs/DEPLOY.md) | Systemd、Nginx、Docker |
-| [API文档](./docs/API.md) | 彩虹易支付/V免签兼容接口 |
-| [架构设计](./docs/ARCHITECTURE.md) | 项目结构、核心模块 |
-| [国际化指南](./docs/I18N.md) | 多语言支持、翻译开发 |
+| [架构设计](./docs/01-ARCHITECTURE.md) | 项目结构、核心模块、性能优化 |
+| [构建指南](./docs/02-BUILD.md) | 开发/生产模式，跨平台编译 |
+| [部署指南](./docs/03-DEPLOY.md) | Systemd、Nginx、Docker |
+| [API文档](./docs/04-API.md) | 彩虹易支付/V免签兼容接口 |
+| [用户手册](./docs/05-USER_GUIDE.md) | 管理员和商户操作指南 |
+| [兼容性](./docs/06-COMPATIBILITY.md) | 彩虹易支付/V免签兼容对比 |
+| [Telegram](./docs/07-TELEGRAM.md) | Telegram 配置与测试 |
+| [国际化指南](./docs/08-I18N.md) | 多语言支持、翻译开发 |
+| [测试计划](./docs/09-TESTPLAN.md) | 功能测试计划 |
 
 ## 系统要求
 
@@ -438,6 +441,10 @@ curl -s "http://localhost:6088/health/detail"
 ## License
 
 MIT License
+
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=opinework/ezpay&type=Date)](https://star-history.com/#opinework/ezpay&Date)
 
 ## 致谢
 

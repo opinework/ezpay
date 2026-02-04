@@ -264,8 +264,42 @@ func (s *BlockchainService) runListener(chain string, listener *ChainListener) {
 
 	log.Printf("Starting %s listener", chain)
 
-	ticker := time.NewTicker(time.Duration(listener.scanInterval) * time.Second)
+	// 使用动态扫描间隔
+	currentInterval := listener.scanInterval
+	ticker := time.NewTicker(time.Duration(currentInterval) * time.Second)
 	defer ticker.Stop()
+
+	// 智能调频：根据待支付订单数量动态调整扫描间隔
+	adjustInterval := func() {
+		// 查询该链上是否有待支付订单
+		var count int64
+		err := model.GetDB().Model(&model.Order{}).
+			Where("status = ? AND chain = ?", model.OrderStatusPending, chain).
+			Count(&count).Error
+
+		if err == nil {
+			var newInterval int
+			if count > 0 {
+				// 有待支付订单，使用快速扫描（基础间隔）
+				newInterval = listener.scanInterval
+			} else {
+				// 无待支付订单，降低扫描频率（4倍基础间隔，最大60秒）
+				newInterval = listener.scanInterval * 4
+				if newInterval > 60 {
+					newInterval = 60
+				}
+			}
+
+			// 如果间隔有变化，重置定时器
+			if newInterval != currentInterval {
+				currentInterval = newInterval
+				ticker.Reset(time.Duration(currentInterval) * time.Second)
+				log.Printf("%s listener adjusted scan interval to %d seconds (pending orders: %d)", chain, currentInterval, count)
+			}
+		}
+	}
+
+	scanCount := 0
 
 	for {
 		select {
@@ -283,6 +317,12 @@ func (s *BlockchainService) runListener(chain string, listener *ChainListener) {
 			return
 		case <-ticker.C:
 			s.scanChain(listener)
+			scanCount++
+
+			// 每5次扫描后调整一次扫描间隔
+			if scanCount%5 == 0 {
+				adjustInterval()
+			}
 		}
 	}
 }
@@ -710,6 +750,9 @@ func (s *BlockchainService) processTransfer(transfer Transfer) {
 			return
 		}
 
+		// 使订单缓存失效
+		GetOrderService().InvalidateOrderCache(order.TradeNo)
+
 		// 更新交易日志
 		model.GetDB().Model(&txLog).Updates(map[string]interface{}{
 			"matched":  true,
@@ -752,26 +795,33 @@ func (s *BlockchainService) matchOrder(transfer Transfer) *model.Order {
 		normalizedAmount = transfer.Amount.Round(6) // 加密货币6位
 	}
 
+	// 计算过期容忍时间：当前时间 - 1分钟
+	// 超过这个时间过期的订单将不再匹配，避免浪费扫描资源
+	expiredTolerance := time.Now().Add(-1 * time.Minute)
+
 	// 精确匹配唯一标识金额（无容差）
 	// 加密货币: 102.040023 USDT
 	// 法币: 100.01 CNY
+	// 条件：待支付状态 且 (未过期 或 过期时间在1分钟以内)
 	err := model.GetDB().
-		Where("chain = ? AND to_address = ? AND unique_amount = ? AND status = ?",
+		Where("chain = ? AND to_address = ? AND unique_amount = ? AND status = ? AND expired_at > ?",
 			transfer.Chain,
 			strings.ToLower(transfer.To),
 			normalizedAmount,
-			model.OrderStatusPending).
+			model.OrderStatusPending,
+			expiredTolerance).
 		Order("created_at ASC").
 		First(&order).Error
 
 	if err != nil {
 		// 兼容旧订单：尝试匹配 usdt_amount (旧字段)
 		err = model.GetDB().
-			Where("chain = ? AND to_address = ? AND usdt_amount = ? AND status = ?",
+			Where("chain = ? AND to_address = ? AND usdt_amount = ? AND status = ? AND expired_at > ?",
 				transfer.Chain,
 				strings.ToLower(transfer.To),
 				normalizedAmount,
-				model.OrderStatusPending).
+				model.OrderStatusPending,
+				expiredTolerance).
 			Order("created_at ASC").
 			First(&order).Error
 

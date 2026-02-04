@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"ezpay/internal/model"
@@ -14,15 +15,27 @@ import (
 	"gorm.io/gorm"
 )
 
+// orderCacheItem 订单缓存项
+type orderCacheItem struct {
+	order     *model.Order
+	paid      bool
+	timestamp time.Time
+}
+
 // OrderService 订单服务
-type OrderService struct{}
+type OrderService struct {
+	cache    sync.Map // 订单状态缓存: tradeNo -> orderCacheItem
+	cacheTTL time.Duration
+}
 
 var orderService *OrderService
 
 // GetOrderService 获取订单服务
 func GetOrderService() *OrderService {
 	if orderService == nil {
-		orderService = &OrderService{}
+		orderService = &OrderService{
+			cacheTTL: 5 * time.Second, // 缓存5秒
+		}
 	}
 	return orderService
 }
@@ -790,6 +803,9 @@ func (s *OrderService) MarkOrderPaid(tradeNo string, txHash string, amount decim
 		return err
 	}
 
+	// 使缓存失效
+	s.InvalidateOrderCache(tradeNo)
+
 	// 重新加载订单数据
 	model.GetDB().First(&order, order.ID)
 
@@ -804,6 +820,17 @@ func (s *OrderService) MarkOrderPaid(tradeNo string, txHash string, amount decim
 
 // CheckOrderPaid 检查订单是否已支付 (用于轮询)
 func (s *OrderService) CheckOrderPaid(tradeNo string) (bool, *model.Order, error) {
+	// 检查缓存
+	if cached, ok := s.cache.Load(tradeNo); ok {
+		item := cached.(orderCacheItem)
+		// 如果缓存未过期且订单已支付或已过期，直接返回缓存结果
+		// 已支付和已过期的订单状态不会再变化，可以长期缓存
+		if time.Since(item.timestamp) < s.cacheTTL || item.order.Status == model.OrderStatusPaid || item.order.Status == model.OrderStatusExpired {
+			return item.paid, item.order, nil
+		}
+	}
+
+	// 从数据库查询
 	var order model.Order
 	if err := model.GetDB().Where("trade_no = ?", tradeNo).First(&order).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -812,5 +839,19 @@ func (s *OrderService) CheckOrderPaid(tradeNo string) (bool, *model.Order, error
 		return false, nil, err
 	}
 
-	return order.Status == model.OrderStatusPaid, &order, nil
+	paid := order.Status == model.OrderStatusPaid
+
+	// 更新缓存
+	s.cache.Store(tradeNo, orderCacheItem{
+		order:     &order,
+		paid:      paid,
+		timestamp: time.Now(),
+	})
+
+	return paid, &order, nil
+}
+
+// InvalidateOrderCache 使订单缓存失效（在订单状态更新时调用）
+func (s *OrderService) InvalidateOrderCache(tradeNo string) {
+	s.cache.Delete(tradeNo)
 }

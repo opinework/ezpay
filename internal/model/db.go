@@ -138,6 +138,8 @@ func initDefaultData() error {
 		// 使用 NO_AUTO_VALUE_ON_ZERO 模式允许插入 id=0
 		// 这是MySQL官方推荐的方式来插入0到AUTO_INCREMENT列
 		DB.Exec("SET SESSION sql_mode = 'NO_AUTO_VALUE_ON_ZERO'")
+		// 确保无论后续操作是否出错都恢复 sql_mode
+		defer DB.Exec("SET SESSION sql_mode = ''")
 		result := DB.Exec(`INSERT INTO merchants (id, p_id, name, ` + "`key`" + `, password, status, created_at, updated_at)
 			VALUES (0, 'SYSTEM', '系统钱包', 'system_key', '', 1, NOW(), NOW())
 			ON DUPLICATE KEY UPDATE p_id = 'SYSTEM'`)
@@ -148,8 +150,6 @@ func initDefaultData() error {
 		} else {
 			log.Println("System merchant (id=0) already exists")
 		}
-		// 恢复默认sql_mode
-		DB.Exec("SET SESSION sql_mode = ''")
 	}
 
 	// 初始化默认管理员
@@ -164,15 +164,6 @@ func initDefaultData() error {
 		}
 		if err := DB.Create(&admin).Error; err != nil {
 			return err
-		}
-	} else {
-		// 修复已存在的管理员密码（如果是旧的错误哈希值）
-		var admin Admin
-		if err := DB.Where("username = ?", "admin").First(&admin).Error; err == nil {
-			if admin.Password != correctHash {
-				DB.Model(&admin).Update("password", correctHash)
-				log.Println("Admin password has been reset to default")
-			}
 		}
 	}
 

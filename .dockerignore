@@ -1,0 +1,37 @@
+# Git
+.git
+.gitignore
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+
+# Build artifacts
+bin/
+release/
+*.exe
+ezpay
+
+# Config (mount at runtime)
+config.yaml
+
+# Data directories
+ezpay_data/
+storage/
+
+# Documentation
+docs/
+*.md
+!README.md
+
+# Docker
+Dockerfile
+docker-compose*.yml
+.dockerignore
+
+# Misc
+.DS_Store
+*.log
+*.tmp

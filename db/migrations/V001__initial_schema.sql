@@ -1,7 +1,6 @@
 -- ========================================
--- V001: EzPay 完整初始数据库结构  
--- 描述: 包含所有表、字段、索引和初始配置（包含 USD 结算体系）
--- 日期: 2026-01-30
+-- EzPay 完整数据库初始化脚本
+-- 描述: 包含所有表结构、索引和初始配置数据
 -- ========================================
 
 SET NAMES utf8mb4;
@@ -10,7 +9,7 @@ SET NAMES utf8mb4;
 -- 创建数据库: CREATE DATABASE ezpay DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- =====================================================
--- 表结构 (GORM会自动创建，此处仅供参考和手动初始化)
+-- 表结构
 -- =====================================================
 
 -- 管理员表
@@ -45,10 +44,15 @@ CREATE TABLE IF NOT EXISTS `merchants` (
   `referer_whitelist` text COMMENT 'Referer白名单(JSON数组)',
   `referer_whitelist_enabled` tinyint DEFAULT '0' COMMENT '是否启用Referer白名单',
   `telegram_chat_id` bigint DEFAULT '0' COMMENT 'Telegram Chat ID',
+  `telegram_notify` tinyint(1) DEFAULT '1' COMMENT '是否开启Telegram通知',
+  `telegram_status` varchar(20) DEFAULT 'unbound' COMMENT 'Telegram状态: normal正常, blocked被封禁, unbound未绑定',
+  `notify_settings` json DEFAULT NULL COMMENT '通知设置详情',
   `created_at` datetime(3) DEFAULT NULL,
   `updated_at` datetime(3) DEFAULT NULL,
+  `deleted_at` datetime(3) DEFAULT NULL,
   PRIMARY KEY (`id`),
-  UNIQUE KEY `idx_merchants_p_id` (`p_id`)
+  UNIQUE KEY `idx_merchants_p_id` (`p_id`),
+  KEY `idx_merchants_deleted_at` (`deleted_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 钱包表
@@ -80,8 +84,12 @@ CREATE TABLE IF NOT EXISTS `orders` (
   `type` varchar(20) DEFAULT '' COMMENT '支付类型',
   `chain` varchar(20) NOT NULL COMMENT '链类型',
   `name` varchar(200) DEFAULT '' COMMENT '商品名称',
+  `currency` varchar(10) DEFAULT 'USD' COMMENT '原始货币: USD, EUR, CNY',
   `money` decimal(20,2) NOT NULL COMMENT '订单金额(CNY)',
   `usdt_amount` decimal(20,8) DEFAULT '0.00000000' COMMENT 'USDT金额',
+  `pay_amount` decimal(20,8) DEFAULT '0.00000000' COMMENT '用户应支付金额(展示用，无偏移)',
+  `unique_amount` decimal(20,8) DEFAULT '0.00000000' COMMENT '订单标识金额(含偏移，用于匹配)',
+  `settlement_amount` decimal(20,8) DEFAULT '0.00000000' COMMENT '结算金额（USD，计入商户余额）',
   `actual_amount` decimal(20,8) DEFAULT '0.00000000' COMMENT '实际支付金额',
   `rate` decimal(20,4) DEFAULT '0.0000' COMMENT '汇率',
   `fee` decimal(20,8) DEFAULT '0.00000000' COMMENT '手续费',
@@ -97,6 +105,8 @@ CREATE TABLE IF NOT EXISTS `orders` (
   `return_url` varchar(500) DEFAULT '' COMMENT '返回地址',
   `param` text COMMENT '附加参数',
   `channel` varchar(50) DEFAULT 'local' COMMENT '支付通道',
+  `channel_order_id` varchar(100) DEFAULT '' COMMENT '上游通道订单号',
+  `channel_pay_url` varchar(500) DEFAULT '' COMMENT '上游通道支付URL',
   `upstream_order_id` varchar(100) DEFAULT '' COMMENT '上游订单号',
   `expired_at` datetime(3) DEFAULT NULL COMMENT '过期时间',
   `paid_at` datetime(3) DEFAULT NULL COMMENT '支付时间',
@@ -108,7 +118,9 @@ CREATE TABLE IF NOT EXISTS `orders` (
   KEY `idx_orders_out_trade_no` (`out_trade_no`),
   KEY `idx_orders_status` (`status`),
   KEY `idx_orders_created_at` (`created_at`),
-  KEY `idx_orders_expired_at` (`expired_at`)
+  KEY `idx_orders_expired_at` (`expired_at`),
+  KEY `idx_orders_unique_amount` (`unique_amount`),
+  KEY `idx_orders_settlement_amount` (`settlement_amount`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 系统配置表
@@ -147,6 +159,9 @@ CREATE TABLE IF NOT EXISTS `withdrawals` (
   `amount` decimal(20,8) NOT NULL COMMENT '提现金额',
   `fee` decimal(20,8) DEFAULT '0.00000000' COMMENT '手续费',
   `real_amount` decimal(20,8) DEFAULT '0.00000000' COMMENT '实际到账',
+  `payout_amount` decimal(20,8) DEFAULT '0.00000000' COMMENT '实际打款金额（USDT/TRX等）',
+  `payout_currency` varchar(20) DEFAULT '' COMMENT '打款货币: USDT, TRX等',
+  `payout_rate` decimal(20,4) DEFAULT '0.0000' COMMENT '打款汇率（卖出汇率）',
   `pay_method` varchar(20) DEFAULT '' COMMENT '提现方式',
   `address` varchar(200) DEFAULT '' COMMENT '提现地址',
   `tx_hash` varchar(200) DEFAULT '' COMMENT '交易哈希',
@@ -219,6 +234,56 @@ CREATE TABLE IF NOT EXISTS `transaction_logs` (
   KEY `idx_transaction_logs_created_at` (`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- 版本管理表
+CREATE TABLE IF NOT EXISTS `database_migrations` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `version` varchar(50) NOT NULL COMMENT '版本号 (如: V001, V002)',
+  `description` varchar(200) NOT NULL COMMENT '迁移描述',
+  `script_name` varchar(100) NOT NULL COMMENT '脚本文件名',
+  `checksum` varchar(64) DEFAULT NULL COMMENT 'SHA256校验和',
+  `executed_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '执行时间',
+  `execution_time` int DEFAULT 0 COMMENT '执行耗时（毫秒）',
+  `status` enum('SUCCESS','FAILED','ROLLBACK') NOT NULL DEFAULT 'SUCCESS' COMMENT '执行状态',
+  `error_message` text COMMENT '错误信息',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `idx_version` (`version`),
+  KEY `idx_executed_at` (`executed_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='数据库迁移版本管理表';
+
+-- 汇率配置表
+CREATE TABLE IF NOT EXISTS `exchange_rates` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `from_currency` varchar(10) NOT NULL COMMENT '源货币',
+  `to_currency` varchar(10) NOT NULL COMMENT '目标货币',
+  `rate` decimal(18,8) NOT NULL COMMENT '基础汇率(中间价)',
+  `rate_type` enum('manual','auto') DEFAULT 'manual' COMMENT '汇率类型: manual手动, auto自动',
+  `source` varchar(50) DEFAULT NULL COMMENT '数据源(auto时): binance, okx等',
+  `auto_update` tinyint(1) DEFAULT 0 COMMENT '是否启用自动更新: 1启用, 0禁用',
+  `last_updated` datetime(3) DEFAULT NULL COMMENT '最后更新时间',
+  `created_at` datetime(3) DEFAULT NULL COMMENT '创建时间',
+  `updated_at` datetime(3) DEFAULT NULL COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_from_to` (`from_currency`,`to_currency`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='汇率配置表';
+
+-- 汇率更新记录表
+CREATE TABLE IF NOT EXISTS `exchange_rate_history` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `rate_id` bigint unsigned NOT NULL COMMENT '汇率ID（关联 exchange_rates.id）',
+  `from_currency` varchar(10) NOT NULL COMMENT '源货币',
+  `to_currency` varchar(10) NOT NULL COMMENT '目标货币',
+  `old_rate` decimal(18,8) DEFAULT NULL COMMENT '旧汇率',
+  `new_rate` decimal(18,8) NOT NULL COMMENT '新汇率',
+  `change_percent` decimal(8,4) DEFAULT NULL COMMENT '变化百分比',
+  `update_source` varchar(50) DEFAULT NULL COMMENT '更新来源: auto自动, manual手动, api接口',
+  `updated_by` varchar(50) DEFAULT NULL COMMENT '更新者: system, admin, api',
+  `created_at` datetime(3) DEFAULT NULL COMMENT '创建时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_rate_id` (`rate_id`),
+  KEY `idx_created_at` (`created_at`),
+  KEY `idx_from_to` (`from_currency`,`to_currency`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='汇率更新记录表';
+
 -- =====================================================
 -- 初始化数据
 -- =====================================================
@@ -249,7 +314,13 @@ INSERT INTO `system_configs` (`key`, `value`, `description`, `created_at`, `upda
 ('notify_retry', '5', '通知重试次数', NOW(), NOW()),
 ('site_name', 'EzPay', '网站名称', NOW(), NOW()),
 ('system_wallet_fee_rate', '0.02', '系统收款码手续费率', NOW(), NOW()),
-('personal_wallet_fee_rate', '0.01', '个人收款码手续费率', NOW(), NOW())
+('personal_wallet_fee_rate', '0.01', '个人收款码手续费率', NOW(), NOW()),
+('rate_buy_float', '0.02', '买入汇率浮动（用户支付时加价），如0.02表示+2%', NOW(), NOW()),
+('rate_sell_float', '0.02', '卖出汇率浮动（商户提现时减价），如0.02表示-2%', NOW(), NOW()),
+('telegram_enabled', '0', 'Telegram服务总开关: 1启用 0禁用', NOW(), NOW()),
+('telegram_mode', 'polling', 'Telegram接收模式: polling轮询模式 webhook推送模式', NOW(), NOW()),
+('telegram_webhook_url', '', 'Telegram Webhook地址，例如: https://yourdomain.com/telegram/webhook', NOW(), NOW()),
+('telegram_webhook_secret', '', 'Telegram Webhook验证密钥，用于验证请求来源', NOW(), NOW())
 ON DUPLICATE KEY UPDATE `key` = VALUES(`key`);
 
 -- 初始化链路配置
@@ -268,238 +339,21 @@ INSERT INTO `chain_configs` (`chain`, `name`, `enabled`, `decimals`, `created_at
 ('redotpay', 'RedotPay', 0, 2, NOW(), NOW())
 ON DUPLICATE KEY UPDATE `chain` = VALUES(`chain`);
 
+-- 初始化默认汇率配置
+INSERT INTO `exchange_rates` (`from_currency`, `to_currency`, `rate`, `rate_type`, `auto_update`, `created_at`, `updated_at`) VALUES
+('EUR', 'USD', 1.08000000, 'auto', 1, NOW(3), NOW(3)),
+('CNY', 'USD', 0.14000000, 'auto', 1, NOW(3), NOW(3)),
+('USD', 'USDT', 1.00000000, 'auto', 1, NOW(3), NOW(3)),
+('USD', 'TRX', 4.35000000, 'auto', 1, NOW(3), NOW(3)),
+('USD', 'CNY', 7.20000000, 'auto', 1, NOW(3), NOW(3))
+ON DUPLICATE KEY UPDATE
+  `rate` = VALUES(`rate`),
+  `updated_at` = NOW(3);
+
 -- =====================================================
 -- 默认账号信息
 -- =====================================================
 -- 管理员: admin / admin123
 -- 商户: 10001 / merchant123 (密钥: test_key_123456)
 
--- ========================================
--- V001 扩展：版本管理表
--- ========================================
-
-CREATE TABLE IF NOT EXISTS `database_migrations` (
-  `id` bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '主键ID',
-  `version` varchar(50) NOT NULL COMMENT '版本号 (如: V001, V002)',
-  `description` varchar(200) NOT NULL COMMENT '迁移描述',
-  `script_name` varchar(100) NOT NULL COMMENT '脚本文件名',
-  `checksum` varchar(64) DEFAULT NULL COMMENT 'SHA256校验和',
-  `executed_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '执行时间',
-  `execution_time` int DEFAULT 0 COMMENT '执行耗时（毫秒）',
-  `status` enum('SUCCESS','FAILED','ROLLBACK') NOT NULL DEFAULT 'SUCCESS' COMMENT '执行状态',
-  `error_message` text COMMENT '错误信息',
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `idx_version` (`version`),
-  KEY `idx_executed_at` (`executed_at`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='数据库迁移版本管理表';
-
--- ========================================
--- V001 扩展：为 orders 表添加 USD 结算体系字段
--- ========================================
-
--- 添加 currency 字段
-SET @col_exists = 0;
-SELECT COUNT(*) INTO @col_exists
-FROM information_schema.COLUMNS
-WHERE TABLE_SCHEMA = DATABASE()
-  AND TABLE_NAME = 'orders'
-  AND COLUMN_NAME = 'currency';
-
-SET @sql = IF(@col_exists = 0,
-    'ALTER TABLE `orders` ADD COLUMN `currency` VARCHAR(10) DEFAULT ''USD'' COMMENT ''原始货币: USD, EUR, CNY'' AFTER `name`',
-    'SELECT ''currency already exists'' AS msg');
-PREPARE stmt FROM @sql;
-EXECUTE stmt;
-DEALLOCATE PREPARE stmt;
-
--- 添加 pay_amount 字段
-SET @col_exists = 0;
-SELECT COUNT(*) INTO @col_exists
-FROM information_schema.COLUMNS
-WHERE TABLE_SCHEMA = DATABASE()
-  AND TABLE_NAME = 'orders'
-  AND COLUMN_NAME = 'pay_amount';
-
-SET @sql = IF(@col_exists = 0,
-    'ALTER TABLE `orders` ADD COLUMN `pay_amount` DECIMAL(20,8) DEFAULT 0.00000000 COMMENT ''用户应支付金额(展示用，无偏移)'' AFTER `usdt_amount`',
-    'SELECT ''pay_amount already exists'' AS msg');
-PREPARE stmt FROM @sql;
-EXECUTE stmt;
-DEALLOCATE PREPARE stmt;
-
--- 添加 unique_amount 字段  
-SET @col_exists = 0;
-SELECT COUNT(*) INTO @col_exists
-FROM information_schema.COLUMNS
-WHERE TABLE_SCHEMA = DATABASE()
-  AND TABLE_NAME = 'orders'
-  AND COLUMN_NAME = 'unique_amount';
-
-SET @sql = IF(@col_exists = 0,
-    'ALTER TABLE `orders` ADD COLUMN `unique_amount` DECIMAL(20,8) DEFAULT 0.00000000 COMMENT ''订单标识金额(含偏移，用于匹配)'' AFTER `pay_amount`',
-    'SELECT ''unique_amount already exists'' AS msg');
-PREPARE stmt FROM @sql;
-EXECUTE stmt;
-DEALLOCATE PREPARE stmt;
-
--- 添加 settlement_amount 字段
-SET @col_exists = 0;
-SELECT COUNT(*) INTO @col_exists
-FROM information_schema.COLUMNS
-WHERE TABLE_SCHEMA = DATABASE()
-  AND TABLE_NAME = 'orders'
-  AND COLUMN_NAME = 'settlement_amount';
-
-SET @sql = IF(@col_exists = 0,
-    'ALTER TABLE `orders` ADD COLUMN `settlement_amount` DECIMAL(20,8) DEFAULT 0.00000000 COMMENT ''结算金额（USD，计入商户余额）'' AFTER `unique_amount`',
-    'SELECT ''settlement_amount already exists'' AS msg');
-PREPARE stmt FROM @sql;
-EXECUTE stmt;
-DEALLOCATE PREPARE stmt;
-
--- 添加 channel_order_id 字段
-SET @col_exists = 0;
-SELECT COUNT(*) INTO @col_exists
-FROM information_schema.COLUMNS
-WHERE TABLE_SCHEMA = DATABASE()
-  AND TABLE_NAME = 'orders'
-  AND COLUMN_NAME = 'channel_order_id';
-
-SET @sql = IF(@col_exists = 0,
-    'ALTER TABLE `orders` ADD COLUMN `channel_order_id` VARCHAR(100) DEFAULT '''' COMMENT ''上游通道订单号'' AFTER `channel`',
-    'SELECT ''channel_order_id already exists'' AS msg');
-PREPARE stmt FROM @sql;
-EXECUTE stmt;
-DEALLOCATE PREPARE stmt;
-
--- 添加 channel_pay_url 字段
-SET @col_exists = 0;
-SELECT COUNT(*) INTO @col_exists
-FROM information_schema.COLUMNS
-WHERE TABLE_SCHEMA = DATABASE()
-  AND TABLE_NAME = 'orders'
-  AND COLUMN_NAME = 'channel_pay_url';
-
-SET @sql = IF(@col_exists = 0,
-    'ALTER TABLE `orders` ADD COLUMN `channel_pay_url` VARCHAR(500) DEFAULT '''' COMMENT ''上游通道支付URL'' AFTER `channel_order_id`',
-    'SELECT ''channel_pay_url already exists'' AS msg');
-PREPARE stmt FROM @sql;
-EXECUTE stmt;
-DEALLOCATE PREPARE stmt;
-
--- 添加索引
-SET @index_exists = 0;
-SELECT COUNT(*) INTO @index_exists
-FROM information_schema.STATISTICS
-WHERE TABLE_SCHEMA = DATABASE()
-  AND TABLE_NAME = 'orders'
-  AND INDEX_NAME = 'idx_orders_unique_amount';
-
-SET @sql = IF(@index_exists = 0,
-    'ALTER TABLE `orders` ADD INDEX `idx_orders_unique_amount` (`unique_amount`)',
-    'SELECT ''idx_orders_unique_amount already exists'' AS msg');
-PREPARE stmt FROM @sql;
-EXECUTE stmt;
-DEALLOCATE PREPARE stmt;
-
-SET @index_exists = 0;
-SELECT COUNT(*) INTO @index_exists
-FROM information_schema.STATISTICS
-WHERE TABLE_SCHEMA = DATABASE()
-  AND TABLE_NAME = 'orders'
-  AND INDEX_NAME = 'idx_orders_settlement_amount';
-
-SET @sql = IF(@index_exists = 0,
-    'ALTER TABLE `orders` ADD INDEX `idx_orders_settlement_amount` (`settlement_amount`)',
-    'SELECT ''idx_orders_settlement_amount already exists'' AS msg');
-PREPARE stmt FROM @sql;
-EXECUTE stmt;
-DEALLOCATE PREPARE stmt;
-
--- ========================================
--- V001 扩展：为 withdrawals 表添加字段
--- ========================================
-
--- 添加 payout_amount 字段
-SET @col_exists = 0;
-SELECT COUNT(*) INTO @col_exists
-FROM information_schema.COLUMNS
-WHERE TABLE_SCHEMA = DATABASE()
-  AND TABLE_NAME = 'withdrawals'
-  AND COLUMN_NAME = 'payout_amount';
-
-SET @sql = IF(@col_exists = 0,
-    'ALTER TABLE `withdrawals` ADD COLUMN `payout_amount` DECIMAL(20,8) DEFAULT 0.00000000 COMMENT ''实际打款金额（USDT/TRX等）'' AFTER `real_amount`',
-    'SELECT ''payout_amount already exists'' AS msg');
-PREPARE stmt FROM @sql;
-EXECUTE stmt;
-DEALLOCATE PREPARE stmt;
-
--- 添加 payout_currency 字段
-SET @col_exists = 0;
-SELECT COUNT(*) INTO @col_exists
-FROM information_schema.COLUMNS
-WHERE TABLE_SCHEMA = DATABASE()
-  AND TABLE_NAME = 'withdrawals'
-  AND COLUMN_NAME = 'payout_currency';
-
-SET @sql = IF(@col_exists = 0,
-    'ALTER TABLE `withdrawals` ADD COLUMN `payout_currency` VARCHAR(20) DEFAULT '''' COMMENT ''打款货币: USDT, TRX等'' AFTER `payout_amount`',
-    'SELECT ''payout_currency already exists'' AS msg');
-PREPARE stmt FROM @sql;
-EXECUTE stmt;
-DEALLOCATE PREPARE stmt;
-
--- 添加 payout_rate 字段
-SET @col_exists = 0;
-SELECT COUNT(*) INTO @col_exists
-FROM information_schema.COLUMNS
-WHERE TABLE_SCHEMA = DATABASE()
-  AND TABLE_NAME = 'withdrawals'
-  AND COLUMN_NAME = 'payout_rate';
-
-SET @sql = IF(@col_exists = 0,
-    'ALTER TABLE `withdrawals` ADD COLUMN `payout_rate` DECIMAL(20,4) DEFAULT 0.0000 COMMENT ''打款汇率（卖出汇率）'' AFTER `payout_currency`',
-    'SELECT ''payout_rate already exists'' AS msg');
-PREPARE stmt FROM @sql;
-EXECUTE stmt;
-DEALLOCATE PREPARE stmt;
-
--- ========================================
--- V001 扩展：添加系统配置
--- ========================================
-
--- 买入汇率浮动配置
-INSERT INTO `system_configs` (`key`, `value`, `description`, `created_at`, `updated_at`)
-VALUES ('rate_buy_float', '0.02', '买入汇率浮动（用户支付时，平台收入）', NOW(), NOW())
-ON DUPLICATE KEY UPDATE `updated_at` = NOW();
-
--- 卖出汇率浮动配置
-INSERT INTO `system_configs` (`key`, `value`, `description`, `created_at`, `updated_at`)
-VALUES ('rate_sell_float', '0.02', '卖出汇率浮动（商户提现时，平台支出）', NOW(), NOW())
-ON DUPLICATE KEY UPDATE `updated_at` = NOW();
-
--- ========================================
--- V001 完成
--- ========================================
-
-SELECT 'V001: EzPay 完整初始数据库结构创建成功' AS message;
-
--- ========================================
--- V001 扩展：修复 system_configs 表
--- ========================================
-
--- 添加 created_at 字段（如果不存在）
-SET @col_exists = 0;
-SELECT COUNT(*) INTO @col_exists
-FROM information_schema.COLUMNS
-WHERE TABLE_SCHEMA = DATABASE()
-  AND TABLE_NAME = 'system_configs'
-  AND COLUMN_NAME = 'created_at';
-
-SET @sql = IF(@col_exists = 0,
-    'ALTER TABLE `system_configs` ADD COLUMN `created_at` datetime(3) DEFAULT NULL COMMENT ''创建时间'' AFTER `description`',
-    'SELECT ''created_at already exists'' AS msg');
-PREPARE stmt FROM @sql;
-EXECUTE stmt;
-DEALLOCATE PREPARE stmt;
+SELECT 'EzPay 数据库初始化完成' AS message;

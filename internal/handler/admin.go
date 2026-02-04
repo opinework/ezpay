@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"ezpay/config"
@@ -24,11 +25,20 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/shopspring/decimal"
+	"gorm.io/gorm"
 )
 
 // 外部API调用使用的HTTP客户端（带超时）
 var externalHTTPClient = &http.Client{
 	Timeout: 10 * time.Second,
+}
+
+// escapeLike 转义 SQL LIKE 通配符
+func escapeLike(s string) string {
+	s = strings.ReplaceAll(s, "\\", "\\\\")
+	s = strings.ReplaceAll(s, "%", "\\%")
+	s = strings.ReplaceAll(s, "_", "\\_")
+	return s
 }
 
 // AdminHandler 管理后台处理器
@@ -376,36 +386,46 @@ func (h *AdminHandler) CleanInvalidOrders(c *gin.Context) {
 		return
 	}
 
-	// 退还预扣的手续费
+	// 在事务中退还手续费并删除订单
 	refundCount := 0
-	for _, order := range orders {
-		if order.FeeType == model.FeeTypeBalance && order.Status == model.OrderStatusPending {
-			fee, _ := order.Fee.Float64()
-			if fee > 0 {
-				if err := service.GetWithdrawService().RefundPreChargedFee(order.MerchantID, fee); err == nil {
-					refundCount++
+	var deletedCount int64
+	txErr := model.GetDB().Transaction(func(tx *gorm.DB) error {
+		// 退还预扣的手续费
+		for _, order := range orders {
+			if order.FeeType == model.FeeTypeBalance && order.Status == model.OrderStatusPending {
+				fee, _ := order.Fee.Float64()
+				if fee > 0 {
+					if err := service.GetWithdrawService().RefundPreChargedFee(order.MerchantID, fee); err == nil {
+						refundCount++
+					}
 				}
 			}
 		}
-	}
 
-	// 删除订单
-	result := model.GetDB().Where(
-		"status IN (?, ?) AND created_at < ?",
-		model.OrderStatusPending,
-		model.OrderStatusExpired,
-		cutoffTime,
-	).Delete(&model.Order{})
+		// 删除订单
+		result := tx.Where(
+			"status IN (?, ?) AND created_at < ?",
+			model.OrderStatusPending,
+			model.OrderStatusExpired,
+			cutoffTime,
+		).Delete(&model.Order{})
 
-	if result.Error != nil {
-		c.JSON(http.StatusOK, gin.H{"code": -1, "msg": "清理失败: " + result.Error.Error()})
+		if result.Error != nil {
+			return result.Error
+		}
+		deletedCount = result.RowsAffected
+		return nil
+	})
+
+	if txErr != nil {
+		c.JSON(http.StatusOK, gin.H{"code": -1, "msg": "清理失败: " + txErr.Error()})
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"code":              1,
-		"msg":               fmt.Sprintf("清理成功，删除 %d 个订单，退还 %d 笔预扣手续费", result.RowsAffected, refundCount),
-		"count":             result.RowsAffected,
+		"msg":               fmt.Sprintf("清理成功，删除 %d 个订单，退还 %d 笔预扣手续费", deletedCount, refundCount),
+		"count":             deletedCount,
 		"refund_count":      refundCount,
 		"total_pending":     totalPending,
 		"old_orders_before": oldOrders,
@@ -448,7 +468,11 @@ func (h *AdminHandler) CreateMerchant(c *gin.Context) {
 
 	// 设置密码
 	if req.Password != "" {
-		hashedPassword, _ := util.HashPassword(req.Password)
+		hashedPassword, err := util.HashPassword(req.Password)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{"code": -1, "msg": "密码加密失败"})
+			return
+		}
 		merchant.Password = hashedPassword
 	}
 
@@ -490,7 +514,11 @@ func (h *AdminHandler) UpdateMerchant(c *gin.Context) {
 		updates["email"] = req.Email
 	}
 	if req.Password != "" {
-		hashedPassword, _ := util.HashPassword(req.Password)
+		hashedPassword, err := util.HashPassword(req.Password)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{"code": -1, "msg": "密码加密失败"})
+			return
+		}
 		updates["password"] = hashedPassword
 	}
 	if req.NotifyURL != "" {
@@ -803,19 +831,25 @@ func (h *AdminHandler) UpdateWallet(c *gin.Context) {
 func (h *AdminHandler) DeleteWallet(c *gin.Context) {
 	id, _ := strconv.Atoi(c.Param("id"))
 
-	// 检查是否有订单使用过该钱包
-	var orderCount int64
-	model.GetDB().Model(&model.Order{}).Where("wallet_id = ?", id).Count(&orderCount)
+	// 使用事务确保检查和删除的原子性
+	txErr := model.GetDB().Transaction(func(tx *gorm.DB) error {
+		// 检查是否有订单使用过该钱包
+		var orderCount int64
+		tx.Model(&model.Order{}).Where("wallet_id = ?", id).Count(&orderCount)
 
-	if orderCount > 0 {
-		// 有使用记录，只能禁用不能删除
-		c.JSON(http.StatusOK, gin.H{"code": -1, "msg": fmt.Sprintf("该钱包已有%d笔订单使用记录，无法删除，请使用禁用功能", orderCount)})
-		return
-	}
+		if orderCount > 0 {
+			return fmt.Errorf("该钱包已有%d笔订单使用记录，无法删除，请使用禁用功能", orderCount)
+		}
 
-	// 没有使用记录，彻底删除（不是软删除）
-	if err := model.GetDB().Unscoped().Delete(&model.Wallet{}, id).Error; err != nil {
-		c.JSON(http.StatusOK, gin.H{"code": -1, "msg": "删除失败"})
+		// 没有使用记录，彻底删除（不是软删除）
+		if err := tx.Unscoped().Delete(&model.Wallet{}, id).Error; err != nil {
+			return fmt.Errorf("删除失败")
+		}
+		return nil
+	})
+
+	if txErr != nil {
+		c.JSON(http.StatusOK, gin.H{"code": -1, "msg": txErr.Error()})
 		return
 	}
 
@@ -854,9 +888,55 @@ func (h *AdminHandler) UpdateConfigs(c *gin.Context) {
 	// 清除汇率缓存
 	service.GetRateService().ClearCache()
 
-	// 如果更新了 Telegram Bot Token，同步更新 Telegram 服务
-	if botToken, ok := req["telegram_bot_token"]; ok {
-		service.GetTelegramService().UpdateConfig(botToken != "", botToken)
+	// 如果更新了 Telegram 相关配置，同步更新 Telegram 服务
+	needUpdateTelegram := false
+	for key := range req {
+		if strings.HasPrefix(key, "telegram_") {
+			needUpdateTelegram = true
+			break
+		}
+	}
+
+	if needUpdateTelegram {
+		// 从数据库重新加载完整配置
+		var configs []model.SystemConfig
+		model.GetDB().Where("`key` IN (?)", []string{
+			"telegram_enabled",
+			"telegram_bot_token",
+			"telegram_mode",
+			"telegram_webhook_url",
+			"telegram_webhook_secret",
+		}).Find(&configs)
+
+		configMap := make(map[string]string)
+		for _, cfg := range configs {
+			configMap[cfg.Key] = cfg.Value
+		}
+
+		enabled := configMap["telegram_enabled"] == "1"
+		botToken := configMap["telegram_bot_token"]
+		mode := configMap["telegram_mode"]
+		if mode == "" {
+			mode = "polling"
+		}
+
+		webhookURL := configMap["telegram_webhook_url"]
+		if webhookURL == "" && mode == "webhook" {
+			// 自动生成 webhook URL
+			protocol := "https"
+			if h.cfg.Server.Host == "localhost" || h.cfg.Server.Host == "127.0.0.1" {
+				protocol = "http"
+			}
+			host := h.cfg.Server.Host
+			if h.cfg.Server.Port != 80 && h.cfg.Server.Port != 443 {
+				webhookURL = fmt.Sprintf("%s://%s:%d/telegram/webhook", protocol, host, h.cfg.Server.Port)
+			} else {
+				webhookURL = fmt.Sprintf("%s://%s/telegram/webhook", protocol, host)
+			}
+		}
+
+		webhookSecret := configMap["telegram_webhook_secret"]
+		service.GetTelegramService().UpdateFullConfig(enabled, botToken, mode, webhookURL, webhookSecret)
 	}
 
 	c.JSON(http.StatusOK, gin.H{"code": 1, "msg": "success"})
@@ -1005,7 +1085,7 @@ func (h *AdminHandler) GetAPILogs(c *gin.Context) {
 		db = db.Where("merchant_pid = ?", merchantPID)
 	}
 	if endpoint != "" {
-		db = db.Where("endpoint LIKE ?", "%"+endpoint+"%")
+		db = db.Where("endpoint LIKE ?", "%"+escapeLike(endpoint)+"%")
 	}
 	if responseCode != "" {
 		code, _ := strconv.Atoi(responseCode)
@@ -1085,8 +1165,15 @@ func (h *AdminHandler) ChangePassword(c *gin.Context) {
 		return
 	}
 
-	hashedPassword, _ := util.HashPassword(req.NewPassword)
-	model.GetDB().Model(&admin).Update("password", hashedPassword)
+	hashedPassword, err := util.HashPassword(req.NewPassword)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"code": -1, "msg": "密码加密失败"})
+		return
+	}
+	if err := model.GetDB().Model(&admin).Update("password", hashedPassword).Error; err != nil {
+		c.JSON(http.StatusOK, gin.H{"code": -1, "msg": "修改失败"})
+		return
+	}
 
 	c.JSON(http.StatusOK, gin.H{"code": 1, "msg": "修改成功"})
 }
@@ -1190,10 +1277,10 @@ func (h *AdminHandler) ExportOrders(c *gin.Context) {
 		query = query.Where("status = ?", s)
 	}
 	if tradeNo != "" {
-		query = query.Where("trade_no LIKE ?", "%"+tradeNo+"%")
+		query = query.Where("trade_no LIKE ?", "%"+escapeLike(tradeNo)+"%")
 	}
 	if outTradeNo != "" {
-		query = query.Where("out_trade_no LIKE ?", "%"+outTradeNo+"%")
+		query = query.Where("out_trade_no LIKE ?", "%"+escapeLike(outTradeNo)+"%")
 	}
 	if merchantID > 0 {
 		query = query.Where("merchant_id = ?", merchantID)
@@ -1323,7 +1410,10 @@ func (h *AdminHandler) ApproveWithdrawal(c *gin.Context) {
 	var req struct {
 		AdminRemark string `json:"admin_remark"`
 	}
-	c.ShouldBindJSON(&req)
+	if err := c.ShouldBindJSON(&req); err != nil {
+		// admin_remark 是可选的，绑定失败时使用空值继续
+		req.AdminRemark = ""
+	}
 
 	if err := service.GetWithdrawService().ApproveWithdrawal(uint(id), req.AdminRemark); err != nil {
 		c.JSON(http.StatusOK, gin.H{"code": -1, "msg": err.Error()})
@@ -1339,7 +1429,9 @@ func (h *AdminHandler) RejectWithdrawal(c *gin.Context) {
 	var req struct {
 		AdminRemark string `json:"admin_remark"`
 	}
-	c.ShouldBindJSON(&req)
+	if err := c.ShouldBindJSON(&req); err != nil {
+		req.AdminRemark = ""
+	}
 
 	if err := service.GetWithdrawService().RejectWithdrawal(uint(id), req.AdminRemark); err != nil {
 		c.JSON(http.StatusOK, gin.H{"code": -1, "msg": err.Error()})
@@ -1355,7 +1447,9 @@ func (h *AdminHandler) CompleteWithdrawal(c *gin.Context) {
 	var req struct {
 		AdminRemark string `json:"admin_remark"`
 	}
-	c.ShouldBindJSON(&req)
+	if err := c.ShouldBindJSON(&req); err != nil {
+		req.AdminRemark = ""
+	}
 
 	if err := service.GetWithdrawService().CompleteWithdrawal(uint(id), req.AdminRemark); err != nil {
 		c.JSON(http.StatusOK, gin.H{"code": -1, "msg": err.Error()})
@@ -1375,7 +1469,7 @@ func (h *AdminHandler) ListIPBlacklist(c *gin.Context) {
 
 	db := model.GetDB().Model(&model.IPBlacklist{})
 	if ip != "" {
-		db = db.Where("ip LIKE ?", "%"+ip+"%")
+		db = db.Where("ip LIKE ?", "%"+escapeLike(ip)+"%")
 	}
 
 	var total int64

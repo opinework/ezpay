@@ -70,6 +70,7 @@ order:
   expire_minutes: 30       # 订单过期时间(分钟)
   cleanup_hours: 24        # 自动清理多少小时前的无效订单
   wallet_cache_ttl: 30     # 钱包地址缓存时间(秒)
+  status_cache_ttl: 5      # 订单状态查询缓存时间(秒) - 优化轮询性能
 
 # ============================================================================
 # 回调通知配置
@@ -105,12 +106,13 @@ rate:
 # ============================================================================
 blockchain:
   # TRX (Tron原生代币)
+  # 注意：scan_interval 会根据是否有待支付订单自动调整（有订单时使用设定值，无订单时自动延长至4倍）
   trx:
     enabled: true
     rpc: "https://api.trongrid.io"
     contract_address: ""   # TRX原生代币无需合约地址
     confirmations: 19      # 确认区块数
-    scan_interval: 15      # 扫描间隔(秒)
+    scan_interval: 30      # 基础扫描间隔(秒) - 优化后从15秒改为30秒，减少API调用
 
   # TRC20 (Tron USDT)
   trc20:
@@ -118,7 +120,7 @@ blockchain:
     rpc: "https://api.trongrid.io"
     contract_address: "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t"  # USDT合约
     confirmations: 19
-    scan_interval: 15
+    scan_interval: 30      # 基础扫描间隔(秒) - 优化后从15秒改为30秒
 
   # ERC20 (以太坊 USDT)
   erc20:
@@ -126,7 +128,7 @@ blockchain:
     rpc: "https://mainnet.infura.io/v3/YOUR-PROJECT-ID"  # 需替换为你的Infura项目ID
     contract_address: "0xdAC17F958D2ee523a2206206994597C13D831ec7"
     confirmations: 12
-    scan_interval: 15
+    scan_interval: 30      # 基础扫描间隔(秒) - 优化后从15秒改为30秒
 
   # BEP20 (BSC USDT)
   bep20:
@@ -134,7 +136,7 @@ blockchain:
     rpc: "https://bsc-dataseed.binance.org"
     contract_address: "0x55d398326f99059fF775485246999027B3197955"
     confirmations: 15
-    scan_interval: 15
+    scan_interval: 30      # 基础扫描间隔(秒) - 优化后从15秒改为30秒
 
   # Polygon USDT
   polygon:
@@ -142,7 +144,7 @@ blockchain:
     rpc: "https://polygon-rpc.com"
     contract_address: "0xc2132D05D31c914a87C6611C10748AEb04B58e8F"
     confirmations: 128
-    scan_interval: 15
+    scan_interval: 30      # 基础扫描间隔(秒) - 优化后从15秒改为30秒
 
   # Optimism USDT (Layer2)
   optimism:
@@ -150,7 +152,7 @@ blockchain:
     rpc: "https://mainnet.optimism.io"
     contract_address: "0x94b008aA00579c1307B0EF2c499aD98a8ce58e58"
     confirmations: 10
-    scan_interval: 15
+    scan_interval: 30      # 基础扫描间隔(秒) - 优化后从15秒改为30秒
 
   # Arbitrum USDT (Layer2)
   arbitrum:
@@ -158,7 +160,7 @@ blockchain:
     rpc: "https://arb1.arbitrum.io/rpc"
     contract_address: "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9"
     confirmations: 10
-    scan_interval: 15
+    scan_interval: 30      # 基础扫描间隔(秒) - 优化后从15秒改为30秒
 
   # Avalanche C-Chain USDT
   avalanche:
@@ -166,7 +168,7 @@ blockchain:
     rpc: "https://api.avax.network/ext/bc/C/rpc"
     contract_address: "0x9702230A8Ea53601f5cD2dc00fDBc13d4dF4A8c7"
     confirmations: 12
-    scan_interval: 15
+    scan_interval: 30      # 基础扫描间隔(秒) - 优化后从15秒改为30秒
 
   # Base USDT (Coinbase Layer2)
   base:
@@ -174,4 +176,4 @@ blockchain:
     rpc: "https://mainnet.base.org"
     contract_address: "0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2"
     confirmations: 10
-    scan_interval: 15
+    scan_interval: 30      # 基础扫描间隔(秒) - 优化后从15秒改为30秒

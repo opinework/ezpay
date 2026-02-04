@@ -20,6 +20,12 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// 版本信息（在编译时通过 -ldflags 注入）
+var (
+	Version   = "dev"
+	BuildDate = "unknown"
+)
+
 func main() {
 	// 加载配置
 	cfg, err := config.Load()
@@ -73,7 +79,7 @@ func main() {
 
 	// 启动服务器
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
-	log.Printf("EzPay server starting on %s", addr)
+	log.Printf("EzPay v%s (built %s) starting on %s", Version, BuildDate, addr)
 
 	// 优雅关闭
 	go func() {
@@ -163,6 +169,10 @@ func registerRoutes(r *gin.Engine, cfg *config.Config) {
 	r.GET("/channel/notify/vmq", channelHandler.VmqNotify)
 	r.GET("/channel/notify/epay", channelHandler.EpayNotify)
 
+	// ============ Telegram Webhook ============
+	telegramHandler := handler.NewTelegramHandler()
+	r.POST("/telegram/webhook", telegramHandler.HandleWebhook)
+
 	// ============ 管理后台 ============
 	// 管理后台页面
 	r.GET("/admin", func(c *gin.Context) {
@@ -247,6 +257,23 @@ func registerRoutes(r *gin.Engine, cfg *config.Config) {
 
 		// 测试Telegram Bot连接
 		adminAPI.POST("/telegram/test", adminHandler.TestTelegramBot)
+
+		// 查询Telegram Webhook状态
+		adminAPI.GET("/telegram/webhook-info", func(c *gin.Context) {
+			info, err := service.GetTelegramService().GetWebhookInfo()
+			if err != nil {
+				c.JSON(http.StatusOK, gin.H{"code": -1, "msg": err.Error()})
+				return
+			}
+			c.JSON(http.StatusOK, gin.H{
+				"code": 1,
+				"data": gin.H{
+					"mode":    service.GetTelegramService().GetMode(),
+					"enabled": service.GetTelegramService().IsEnabled(),
+					"webhook": info,
+				},
+			})
+		})
 
 		// 链监控管理
 		adminAPI.GET("/chains", adminHandler.GetChainStatus)
@@ -362,7 +389,7 @@ func registerRoutes(r *gin.Engine, cfg *config.Config) {
 		health := gin.H{
 			"status":    "ok",
 			"timestamp": time.Now().Format(time.RFC3339),
-			"version":   "1.0.0",
+			"version":   Version,
 		}
 
 		// 检查数据库
@@ -437,10 +464,53 @@ func startBackgroundServices(cfg *config.Config) {
 	// 启动每日报告
 	service.GetBotService().StartDailyReportWorker()
 
-	// 启动Telegram通知服务 - 先从数据库加载配置
-	var telegramCfg model.SystemConfig
-	if err := model.GetDB().Where("`key` = ?", "telegram_bot_token").First(&telegramCfg).Error; err == nil && telegramCfg.Value != "" {
-		service.GetTelegramService().UpdateConfig(true, telegramCfg.Value)
+	// 启动Telegram通知服务 - 从数据库加载配置
+	var configs []model.SystemConfig
+	model.GetDB().Where("`key` IN (?)", []string{
+		"telegram_enabled",
+		"telegram_bot_token",
+		"telegram_mode",
+		"telegram_webhook_url",
+		"telegram_webhook_secret",
+	}).Find(&configs)
+
+	// 解析配置
+	configMap := make(map[string]string)
+	for _, cfg := range configs {
+		configMap[cfg.Key] = cfg.Value
+	}
+
+	// 获取配置值
+	enabled := configMap["telegram_enabled"] == "1"
+	botToken := configMap["telegram_bot_token"]
+	mode := configMap["telegram_mode"]
+	if mode == "" {
+		mode = "polling" // 默认轮询模式
+	}
+
+	// Webhook URL：如果配置中有值则使用，否则根据服务器配置自动生成
+	webhookURL := configMap["telegram_webhook_url"]
+	if webhookURL == "" && mode == "webhook" {
+		// 自动生成 webhook URL
+		protocol := "https"
+		if cfg.Server.Host == "localhost" || cfg.Server.Host == "127.0.0.1" {
+			protocol = "http"
+		}
+		host := cfg.Server.Host
+		if cfg.Server.Port != 80 && cfg.Server.Port != 443 {
+			webhookURL = fmt.Sprintf("%s://%s:%d/telegram/webhook", protocol, host, cfg.Server.Port)
+		} else {
+			webhookURL = fmt.Sprintf("%s://%s/telegram/webhook", protocol, host)
+		}
+		log.Printf("[Telegram] 自动生成 Webhook URL: %s", webhookURL)
+	}
+
+	// 获取 webhook secret
+	webhookSecret := configMap["telegram_webhook_secret"]
+
+	// 更新 Telegram 服务配置
+	if enabled && botToken != "" {
+		service.GetTelegramService().UpdateFullConfig(enabled, botToken, mode, webhookURL, webhookSecret)
 	}
 	service.GetTelegramService().Start()
 

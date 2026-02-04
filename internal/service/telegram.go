@@ -18,14 +18,18 @@ import (
 
 // TelegramService Telegram通知服务
 type TelegramService struct {
-	enabled   bool
-	botToken  string
-	apiURL    string
-	client    *http.Client
-	stopChan  chan struct{}
-	wg        sync.WaitGroup
-	running   bool
-	mu        sync.Mutex
+	enabled     bool
+	botToken    string
+	apiURL      string
+	client      *http.Client
+	stopChan    chan struct{}
+	wg          sync.WaitGroup
+	running     bool
+	stopped     bool // 标记 stopChan 是否已关闭
+	mu          sync.Mutex
+	mode        string // 接收模式: polling 或 webhook
+	webhookURL  string // Webhook地址
+	secretToken string // Webhook 验证密钥
 }
 
 var telegramService *TelegramService
@@ -90,17 +94,20 @@ func GetTelegramService() *TelegramService {
 	telegramOnce.Do(func() {
 		// 默认禁用，从数据库加载配置后通过 UpdateConfig 启用
 		telegramService = &TelegramService{
-			enabled:  false,
-			botToken: "",
-			apiURL:   "https://api.telegram.org",
-			client:   &http.Client{Timeout: 40 * time.Second}, // 比 long polling timeout(30s) 长
-			stopChan: make(chan struct{}),
+			enabled:     false,
+			botToken:    "",
+			apiURL:      "https://api.telegram.org",
+			client:      &http.Client{Timeout: 40 * time.Second}, // 比 long polling timeout(30s) 长
+			stopChan:    make(chan struct{}),
+			mode:        "polling", // 默认轮询模式
+			webhookURL:  "",
+			secretToken: "",
 		}
 	})
 	return telegramService
 }
 
-// Start 启动Telegram服务(轮询更新)
+// Start 启动Telegram服务
 func (s *TelegramService) Start() {
 	s.mu.Lock()
 	if s.running || !s.enabled || s.botToken == "" {
@@ -108,11 +115,27 @@ func (s *TelegramService) Start() {
 		return
 	}
 	s.running = true
+	mode := s.mode
 	s.mu.Unlock()
 
-	log.Println("[Telegram] 服务启动")
-	s.wg.Add(1)
-	go s.pollUpdates()
+	if mode == "webhook" {
+		log.Println("[Telegram] 服务启动 (Webhook模式)")
+		// Webhook模式：设置webhook地址
+		if err := s.setupWebhook(); err != nil {
+			log.Printf("[Telegram] 设置Webhook失败: %v", err)
+			s.mu.Lock()
+			s.running = false
+			s.mu.Unlock()
+			return
+		}
+		log.Printf("[Telegram] Webhook已设置: %s", s.webhookURL)
+	} else {
+		log.Println("[Telegram] 服务启动 (轮询模式)")
+		// 轮询模式：先删除可能存在的webhook，然后启动轮询
+		s.deleteWebhook()
+		s.wg.Add(1)
+		go s.pollUpdates()
+	}
 }
 
 // Stop 停止Telegram服务
@@ -122,11 +145,24 @@ func (s *TelegramService) Stop() {
 		s.mu.Unlock()
 		return
 	}
+	mode := s.mode
 	s.running = false
 	s.mu.Unlock()
 
-	close(s.stopChan)
-	s.wg.Wait()
+	if mode == "polling" {
+		// 轮询模式：关闭通道并等待goroutine结束
+		s.mu.Lock()
+		if !s.stopped {
+			close(s.stopChan)
+			s.stopped = true
+		}
+		s.mu.Unlock()
+		s.wg.Wait()
+	} else {
+		// Webhook模式：删除webhook
+		s.deleteWebhook()
+	}
+
 	log.Println("[Telegram] 服务停止")
 }
 
@@ -194,6 +230,10 @@ func (s *TelegramService) handleUpdate(update TelegramUpdate) {
 	}
 
 	msg := update.Message
+	if msg.Chat == nil {
+		return
+	}
+
 	text := strings.TrimSpace(msg.Text)
 	chatID := msg.Chat.ID
 
@@ -231,6 +271,10 @@ func (s *TelegramService) handleCommand(chatID int64, text string, user *Telegra
 
 // handleStart 处理 /start 命令
 func (s *TelegramService) handleStart(chatID int64, user *TelegramUser) {
+	if user == nil {
+		s.SendMessage(chatID, "👋 欢迎使用 EzPay 通知机器人！请使用 /help 查看帮助")
+		return
+	}
 	name := user.FirstName
 	if user.LastName != "" {
 		name += " " + user.LastName
@@ -260,6 +304,10 @@ func (s *TelegramService) handleStart(chatID int64, user *TelegramUser) {
 
 // handleBind 处理 /bind 命令
 func (s *TelegramService) handleBind(chatID int64, args []string, user *TelegramUser) {
+	if user == nil {
+		s.SendMessage(chatID, "❌ 无法获取用户信息")
+		return
+	}
 	if len(args) < 2 {
 		s.SendMessage(chatID, "❌ 用法: /bind <商户号> <密钥>\n\n例如: /bind 1001 your_merchant_key")
 		return
@@ -429,7 +477,8 @@ func (s *TelegramService) SendMessage(chatID int64, text string) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
 
 	return nil
 }
@@ -510,14 +559,14 @@ func (s *TelegramService) NotifyOrderCreated(order *model.Order) {
 订单号: %s
 商户订单: %s
 商品: %s
-金额: ¥%.2f
+金额: ¥%s
 USDT: %s
 链: %s
 创建时间: %s
 
 ⏰ 请等待用户支付...`,
 		order.TradeNo, order.OutTradeNo, order.Name,
-		order.Money, order.USDTAmount,
+		order.Money.StringFixed(2), order.USDTAmount,
 		strings.ToUpper(order.Chain),
 		order.CreatedAt.Format("2006-01-02 15:04:05"))
 
@@ -536,7 +585,7 @@ func (s *TelegramService) NotifyOrderPaid(order *model.Order) {
 订单号: %s
 商户订单: %s
 商品: %s
-金额: ¥%.2f
+金额: ¥%s
 USDT: %s
 链: %s
 交易哈希: %s
@@ -544,7 +593,7 @@ USDT: %s
 
 💰 资金已到账！`,
 		order.TradeNo, order.OutTradeNo, order.Name,
-		order.Money, order.USDTAmount,
+		order.Money.StringFixed(2), order.USDTAmount,
 		strings.ToUpper(order.Chain),
 		s.maskHash(order.TxHash),
 		paidTime)
@@ -559,10 +608,10 @@ func (s *TelegramService) NotifyOrderExpired(order *model.Order) {
 订单号: %s
 商户订单: %s
 商品: %s
-金额: ¥%.2f
+金额: ¥%s
 
 订单未在有效期内完成支付，已自动关闭。`,
-		order.TradeNo, order.OutTradeNo, order.Name, order.Money)
+		order.TradeNo, order.OutTradeNo, order.Name, order.Money.StringFixed(2))
 
 	s.SendToMerchant(order.MerchantID, msg)
 }
@@ -930,27 +979,191 @@ func (s *TelegramService) SetEnabled(enabled bool) {
 	s.mu.Unlock()
 }
 
-// UpdateConfig 更新配置
+// UpdateConfig 更新配置（兼容旧版本，仅更新 token 和启用状态）
 func (s *TelegramService) UpdateConfig(enabled bool, botToken string) {
+	s.UpdateFullConfig(enabled, botToken, s.mode, s.webhookURL, s.secretToken)
+}
+
+// UpdateFullConfig 更新完整配置（包括模式、webhook URL 和 secret）
+func (s *TelegramService) UpdateFullConfig(enabled bool, botToken string, mode string, webhookURL string, secret string) {
 	s.mu.Lock()
 	oldToken := s.botToken
+	oldMode := s.mode
+	oldWebhookURL := s.webhookURL
+	oldSecret := s.secretToken
 	s.enabled = enabled
 	s.botToken = botToken
+	s.mode = mode
+	s.webhookURL = webhookURL
+	s.secretToken = secret
 	wasRunning := s.running
 	s.mu.Unlock()
 
-	// 如果 Token 改变了且之前在运行，需要重启
-	if wasRunning && oldToken != botToken {
+	// 如果配置改变了且之前在运行，需要重启
+	needRestart := wasRunning && (oldToken != botToken || oldMode != mode || oldWebhookURL != webhookURL || oldSecret != secret)
+	if needRestart {
 		s.Stop()
 		// 重新初始化 stopChan
+		s.mu.Lock()
 		s.stopChan = make(chan struct{})
+		s.stopped = false
+		s.mu.Unlock()
 	}
 
 	if enabled && botToken != "" {
 		if !s.running {
+			// 启动前确保 stopChan 已初始化
+			s.mu.Lock()
+			if s.stopped || s.stopChan == nil {
+				s.stopChan = make(chan struct{})
+				s.stopped = false
+			}
+			s.mu.Unlock()
 			s.Start()
 		}
 	} else if s.running {
 		s.Stop()
 	}
+}
+
+// GetMode 获取当前模式
+func (s *TelegramService) GetMode() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.mode
+}
+
+// GetWebhookURL 获取 webhook URL
+func (s *TelegramService) GetWebhookURL() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.webhookURL
+}
+
+// setupWebhook 设置 Telegram Webhook
+func (s *TelegramService) setupWebhook() error {
+	if s.webhookURL == "" {
+		return fmt.Errorf("webhook URL 不能为空")
+	}
+
+	url := fmt.Sprintf("%s/bot%s/setWebhook", s.apiURL, s.botToken)
+	payload := map[string]interface{}{
+		"url":             s.webhookURL,
+		"max_connections": 40,
+		"allowed_updates": []string{"message"}, // 只接收消息更新
+		"secret_token":    s.secretToken,        // 验证密钥，Telegram 会在请求头中携带
+	}
+
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("序列化请求失败: %v", err)
+	}
+
+	resp, err := s.client.Post(url, "application/json", bytes.NewBuffer(data))
+	if err != nil {
+		return fmt.Errorf("请求失败: %v", err)
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+
+	var result struct {
+		OK          bool   `json:"ok"`
+		Description string `json:"description"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return fmt.Errorf("解析响应失败: %v", err)
+	}
+
+	if !result.OK {
+		return fmt.Errorf("设置失败: %s", result.Description)
+	}
+
+	return nil
+}
+
+// deleteWebhook 删除 Telegram Webhook
+func (s *TelegramService) deleteWebhook() error {
+	url := fmt.Sprintf("%s/bot%s/deleteWebhook", s.apiURL, s.botToken)
+
+	resp, err := s.client.Post(url, "application/json", nil)
+	if err != nil {
+		log.Printf("[Telegram] 删除Webhook请求失败: %v", err)
+		return err
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+
+	var result struct {
+		OK          bool   `json:"ok"`
+		Description string `json:"description"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		log.Printf("[Telegram] 解析删除Webhook响应失败: %v", err)
+		return err
+	}
+
+	if !result.OK {
+		log.Printf("[Telegram] 删除Webhook失败: %s", result.Description)
+		return fmt.Errorf("删除失败: %s", result.Description)
+	}
+
+	log.Println("[Telegram] Webhook已删除")
+	return nil
+}
+
+// VerifyWebhookSecret 验证 Webhook 请求的 secret token
+func (s *TelegramService) VerifyWebhookSecret(token string) bool {
+	s.mu.Lock()
+	secret := s.secretToken
+	s.mu.Unlock()
+
+	// 未配置 secret 时拒绝所有请求
+	if secret == "" {
+		return false
+	}
+	return token != "" && token == secret
+}
+
+// HandleWebhook 处理 Telegram Webhook 请求
+func (s *TelegramService) HandleWebhook(update *TelegramUpdate) {
+	if !s.IsEnabled() {
+		return
+	}
+	if update == nil || update.Message == nil {
+		return
+	}
+
+	s.handleUpdate(*update)
+}
+
+// GetWebhookInfo 查询当前 Webhook 状态
+func (s *TelegramService) GetWebhookInfo() (map[string]interface{}, error) {
+	if s.botToken == "" {
+		return nil, fmt.Errorf("未配置 Bot Token")
+	}
+
+	url := fmt.Sprintf("%s/bot%s/getWebhookInfo", s.apiURL, s.botToken)
+	resp, err := s.client.Get(url)
+	if err != nil {
+		return nil, fmt.Errorf("请求失败: %v", err)
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+
+	var result struct {
+		OK     bool                   `json:"ok"`
+		Result map[string]interface{} `json:"result"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("解析响应失败: %v", err)
+	}
+
+	if !result.OK {
+		return nil, fmt.Errorf("查询失败")
+	}
+
+	return result.Result, nil
 }

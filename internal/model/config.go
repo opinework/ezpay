@@ -35,6 +35,10 @@ const (
 	ConfigKeyPersonalWalletFeeRate = "personal_wallet_fee_rate" // 个人收款码手续费率 (如0.01表示1%)
 	ConfigKeyServiceTelegram       = "service_telegram"         // 客服Telegram链接
 	ConfigKeyServiceDiscord        = "service_discord"          // 客服Discord链接
+	ConfigKeyTelegramEnabled       = "telegram_enabled"         // Telegram服务总开关: 1启用 0禁用
+	ConfigKeyTelegramMode          = "telegram_mode"            // Telegram接收模式: polling轮询 webhook推送
+	ConfigKeyTelegramWebhookURL    = "telegram_webhook_url"     // Telegram Webhook地址
+	ConfigKeyTelegramWebhookSecret = "telegram_webhook_secret"  // Telegram Webhook验证密钥
 )
 
 // TransactionLog 交易日志表

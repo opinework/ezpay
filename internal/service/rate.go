@@ -11,6 +11,7 @@ import (
 
 	"ezpay/config"
 	"ezpay/internal/model"
+	"ezpay/internal/util"
 
 	"github.com/shopspring/decimal"
 )
@@ -126,6 +127,10 @@ func (s *RateService) getAutoRate() (decimal.Decimal, error) {
 
 // fetchBinanceRate 从Binance获取USDT/CNY汇率
 func (s *RateService) fetchBinanceRate() (decimal.Decimal, error) {
+	// API限流：Binance API限制为每分钟1200次请求权重，这里设置为每秒10次
+	limiter := util.GetAPILimiter("binance", 10.0, 20)
+	limiter.Wait()
+
 	// 从配置中获取 CNY 汇率 API 地址
 	cnyAPI := config.Get().Rate.CnyAPI
 	if cnyAPI == "" {
@@ -162,6 +167,10 @@ func (s *RateService) fetchBinanceRate() (decimal.Decimal, error) {
 
 // fetchOKXRate 从OKX获取USDT/CNY汇率
 func (s *RateService) fetchOKXRate() (decimal.Decimal, error) {
+	// API限流：OKX限制为每秒20次请求
+	limiter := util.GetAPILimiter("okx", 10.0, 20)
+	limiter.Wait()
+
 	url := "https://www.okx.com/api/v5/market/ticker?instId=USDT-USDC"
 
 	client := &http.Client{Timeout: 10 * time.Second}

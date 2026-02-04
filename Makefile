@@ -12,14 +12,14 @@ GO := /Volumes/mindata/Library/go/bin/go
 # 项目信息
 APP_NAME := ezpay
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
-BUILD_TIME := $(shell date +%Y%m%d%H%M%S)
+BUILDDATE := $(shell date -u '+%Y-%m-%d %H:%M:%S UTC')
 
 # 目录
 BIN_DIR := bin
 RELEASE_DIR := release
 
 # 通用编译参数
-LDFLAGS := -s -w -X main.Version=$(VERSION) -X main.BuildTime=$(BUILD_TIME)
+LDFLAGS := -s -w -X main.Version=$(VERSION) -X 'main.BuildDate=$(BUILDDATE)'
 
 # =============================================================================
 # 开发模式
@@ -147,7 +147,7 @@ release-all: clean-release
 	@ls -lh $(RELEASE_DIR)/
 	@echo ""
 	@echo "Version: $(VERSION)"
-	@echo "Build time: $(BUILD_TIME)"
+	@echo "Build date: $(BUILDDATE)"
 
 # 打包发布文件 (带配置文件模板)
 dist: release-all

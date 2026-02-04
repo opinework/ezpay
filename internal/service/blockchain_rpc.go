@@ -8,8 +8,11 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
+
+	"ezpay/internal/util"
 )
 
 // RPCClient RPC 客户端，支持重试和故障转移
@@ -45,7 +48,12 @@ func NewRPCClient(endpoints []string) *RPCClient {
 
 // Get 执行 GET 请求，支持重试和故障转移
 func (c *RPCClient) Get(path string) (*http.Response, error) {
+	// API限流：根据端点类型应用不同的限流策略
+	c.applyRateLimit()
+
 	var lastErr error
+	endpointSwitches := 0
+	maxSwitches := len(c.endpoints) // 最多切换端点数等于端点总数
 
 	for retry := 0; retry <= c.maxRetries; retry++ {
 		endpoint := c.getCurrentEndpoint()
@@ -70,8 +78,8 @@ func (c *RPCClient) Get(path string) (*http.Response, error) {
 
 		// 最后一次重试失败，尝试切换端点
 		if retry == c.maxRetries {
-			if c.switchEndpoint() {
-				// 切换成功，再试一次
+			if endpointSwitches < maxSwitches && c.switchEndpoint() {
+				endpointSwitches++
 				retry = 0
 				continue
 			}
@@ -90,6 +98,9 @@ func (c *RPCClient) Get(path string) (*http.Response, error) {
 
 // Post 执行 POST 请求，支持重试和故障转移
 func (c *RPCClient) Post(path string, contentType string, body io.Reader) (*http.Response, error) {
+	// API限流：根据端点类型应用不同的限流策略
+	c.applyRateLimit()
+
 	// 读取 body 内容（用于重试）
 	var bodyBytes []byte
 	if body != nil {
@@ -101,6 +112,8 @@ func (c *RPCClient) Post(path string, contentType string, body io.Reader) (*http
 	}
 
 	var lastErr error
+	endpointSwitches := 0
+	maxSwitches := len(c.endpoints)
 
 	for retry := 0; retry <= c.maxRetries; retry++ {
 		endpoint := c.getCurrentEndpoint()
@@ -131,8 +144,8 @@ func (c *RPCClient) Post(path string, contentType string, body io.Reader) (*http
 
 		// 最后一次重试失败，尝试切换端点
 		if retry == c.maxRetries {
-			if c.switchEndpoint() {
-				// 切换成功，再试一次
+			if endpointSwitches < maxSwitches && c.switchEndpoint() {
+				endpointSwitches++
 				retry = 0
 				continue
 			}
@@ -172,8 +185,8 @@ func (c *RPCClient) PostJSON(path string, request interface{}) ([]byte, error) {
 
 // getCurrentEndpoint 获取当前端点
 func (c *RPCClient) getCurrentEndpoint() string {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
+	c.mu.Lock()
+	defer c.mu.Unlock()
 
 	if c.currentIndex >= len(c.endpoints) {
 		c.currentIndex = 0
@@ -338,4 +351,44 @@ func (c *RPCClient) DoWithContext(ctx context.Context, req *http.Request) (*http
 	}
 
 	return nil, fmt.Errorf("request failed after retries: %w", lastErr)
+}
+
+// applyRateLimit 根据端点类型应用限流策略
+func (c *RPCClient) applyRateLimit() {
+	endpoint := c.getCurrentEndpoint()
+
+	// 根据不同的API提供商应用不同的限流策略
+	if strings.Contains(endpoint, "trongrid.io") {
+		// TronGrid免费版：限制为每秒5次请求（保守估计）
+		limiter := util.GetAPILimiter("trongrid", 5.0, 10)
+		limiter.Wait()
+	} else if strings.Contains(endpoint, "infura.io") {
+		// Infura免费版：限制为每秒10次请求
+		limiter := util.GetAPILimiter("infura", 10.0, 20)
+		limiter.Wait()
+	} else if strings.Contains(endpoint, "binance.org") || strings.Contains(endpoint, "bsc-dataseed") {
+		// BSC节点：限制为每秒10次请求
+		limiter := util.GetAPILimiter("bsc", 10.0, 20)
+		limiter.Wait()
+	} else if strings.Contains(endpoint, "polygon") {
+		// Polygon节点：限制为每秒10次请求
+		limiter := util.GetAPILimiter("polygon", 10.0, 20)
+		limiter.Wait()
+	} else if strings.Contains(endpoint, "optimism") {
+		// Optimism节点：限制为每秒10次请求
+		limiter := util.GetAPILimiter("optimism", 10.0, 20)
+		limiter.Wait()
+	} else if strings.Contains(endpoint, "arbitrum") {
+		// Arbitrum节点：限制为每秒10次请求
+		limiter := util.GetAPILimiter("arbitrum", 10.0, 20)
+		limiter.Wait()
+	} else if strings.Contains(endpoint, "base.org") {
+		// Base节点：限制为每秒10次请求
+		limiter := util.GetAPILimiter("base", 10.0, 20)
+		limiter.Wait()
+	} else {
+		// 通用限流：限制为每秒5次请求
+		limiter := util.GetAPILimiter("generic-rpc", 5.0, 10)
+		limiter.Wait()
+	}
 }

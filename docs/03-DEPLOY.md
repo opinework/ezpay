@@ -29,10 +29,10 @@ EzPay 使用版本化数据库迁移系统管理数据库结构。
 ```
 
 迁移工具会：
-- ✅ 自动创建版本管理表
-- ✅ 应用 V001 初始化数据库结构
-- ✅ 自动备份（可回滚）
-- ✅ 记录迁移历史
+- 自动创建版本管理表
+- 应用 V001 初始化数据库结构
+- 自动备份（可回滚）
+- 记录迁移历史
 
 #### 升级现有数据库
 
@@ -50,7 +50,7 @@ EzPay 使用版本化数据库迁移系统管理数据库结构。
 ./db/migrate.sh history
 ```
 
-**⚠️ 注意**：
+**注意**：
 - 数据库结构由迁移系统管理，**不要**手动修改表结构
 - 新增字段请创建新的迁移文件（参考 `db/migrations/README.md`）
 - 生产环境迁移前请先在测试环境验证
@@ -175,7 +175,7 @@ blockchain:
 
 ### 4. 启动服务
 
-**⚠️ 重要**: 启动前请确保已执行数据库迁移（参考步骤2）
+**重要**: 启动前请确保已执行数据库迁移（参考步骤2）
 
 ```bash
 # 前台运行（测试）
@@ -436,7 +436,7 @@ CMD ["./ezpay"]
      secret: "your-random-secret-key-here"
    ```
 
-3. **使用 Nginx 反向代理** (见下方 Nginx 配置)
+3. **使用 Nginx 反向代理** (见上方 Nginx 配置)
 
 4. **定期备份数据**
    ```bash
@@ -457,6 +457,8 @@ CMD ["./ezpay"]
    - `telegram_enabled`: true
    - `telegram_bot_token`: 机器人 Token
 4. 商户在 Telegram 中与 Bot 对话绑定账号
+
+详细配置说明请参考 [07-TELEGRAM.md](./07-TELEGRAM.md)
 
 ### Discord
 
@@ -520,7 +522,7 @@ blockchain:
     rpc: https://api.trongrid.io
     confirmations: 19
     scan_interval: 15
-    
+
   trc20:
     enabled: true
     rpc: https://api.trongrid.io
@@ -613,7 +615,7 @@ confirmations: 12
 confirmations: 3
 ```
 
-⚠️ **警告**: 确认数过低可能导致重组风险
+**警告**: 确认数过低可能导致重组风险
 
 #### 3. 数据库优化
 
@@ -634,7 +636,7 @@ DELETE FROM transaction_logs WHERE created_at < DATE_SUB(NOW(), INTERVAL 30 DAY)
 **症状:**
 ```log
 [trx] RPC POST failed (attempt 3/3): context deadline exceeded
-⚠️  ALERT: Chain trx RPC failure rate: 35.2%
+ALERT: Chain trx RPC failure rate: 35.2%
 ```
 
 **排查步骤:**
@@ -652,7 +654,7 @@ DELETE FROM transaction_logs WHERE created_at < DATE_SUB(NOW(), INTERVAL 30 DAY)
 
 **症状:**
 ```log
-⚠️  ALERT: Chain erc20 is 150 blocks behind
+ALERT: Chain erc20 is 150 blocks behind
 ```
 
 **排查步骤:**
@@ -740,4 +742,3 @@ curl http://localhost:6088/admin/api/blockchain/metrics
 
 # 应该看到新的指标字段
 ```
-

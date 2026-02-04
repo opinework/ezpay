@@ -35,12 +35,10 @@ GO_VERSION=$(go version | awk '{print $3}' | sed 's/go//')
 echo -e "${BLUE}Using Go version: $GO_VERSION${NC}"
 echo ""
 
-# Get version from changelog
-if [ -f "$SCRIPT_DIR/changelog" ]; then
-    VERSION=$(head -n1 "$SCRIPT_DIR/changelog" | sed 's/.*(\(.*\)).*/\1/')
-else
-    VERSION="1.0.0-1"
-fi
+# Get version from git
+cd "$PROJECT_DIR"
+GIT_VERSION=$(git describe --tags --always --dirty 2>/dev/null | sed 's/^v//' || echo "1.0.1")
+VERSION="${GIT_VERSION}-1"
 
 echo -e "${BLUE}Package version: $VERSION${NC}"
 echo ""

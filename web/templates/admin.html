@@ -15,8 +15,8 @@
         .login-box h1 { text-align: center; color: #333; margin-bottom: 30px; }
         .form-group { margin-bottom: 20px; }
         .form-group label { display: block; margin-bottom: 8px; color: #666; font-size: 14px; }
-        .form-group input { width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 14px; }
-        .form-group input:focus { outline: none; border-color: #667eea; }
+        .form-group input, .form-group select { width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 14px; background: white; }
+        .form-group input:focus, .form-group select:focus { outline: none; border-color: #667eea; }
         .login-btn { width: 100%; padding: 14px; background: linear-gradient(135deg, #667eea, #764ba2); color: white; border: none; border-radius: 8px; font-size: 16px; cursor: pointer; }
         .login-btn:hover { opacity: 0.9; }
 
@@ -485,6 +485,24 @@
                         <h3 style="margin-top:24px;margin-bottom:16px;color:#333;border-bottom:1px solid #eee;padding-bottom:8px;" data-i18n="adminPage.settings.telegramBotSettings">Telegram 机器人设置</h3>
                         <div class="form-row">
                             <div class="form-group">
+                                <label>启用 Telegram 服务</label>
+                                <select id="cfg_telegram_enabled">
+                                    <option value="0">禁用</option>
+                                    <option value="1">启用</option>
+                                </select>
+                                <small style="color:#666;font-size:12px;">全局开关，禁用后 Telegram 服务将停止运行</small>
+                            </div>
+                            <div class="form-group">
+                                <label>接收模式</label>
+                                <select id="cfg_telegram_mode" onchange="toggleWebhookUrl()">
+                                    <option value="polling">轮询模式 (Polling)</option>
+                                    <option value="webhook">推送模式 (Webhook)</option>
+                                </select>
+                                <small style="color:#666;font-size:12px;">轮询模式适合开发环境，推送模式适合生产环境（需要HTTPS）</small>
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
                                 <label data-i18n="settings.botToken">Bot Token</label>
                                 <input type="text" id="cfg_telegram_bot_token" data-i18n-placeholder="adminPage.settings.botTokenPlaceholder">
                                 <small style="color:#666;font-size:12px;" data-i18n="adminPage.settings.botTokenDesc">在 Telegram 中搜索 @BotFather，发送 /newbot 创建机器人获取 Token</small>
@@ -493,6 +511,23 @@
                                 <label data-i18n="adminPage.settings.botUsername">Bot 用户名</label>
                                 <input type="text" id="cfg_telegram_bot_username" data-i18n-placeholder="adminPage.settings.botUsernamePlaceholder">
                                 <small style="color:#666;font-size:12px;" data-i18n="adminPage.settings.botUsernameDesc">机器人的用户名，方便商户查找绑定 (包含@符号)</small>
+                            </div>
+                        </div>
+                        <div class="form-row" id="webhook_url_row" style="display:none;">
+                            <div class="form-group" style="flex:1;">
+                                <label>Webhook URL (可选)</label>
+                                <input type="text" id="cfg_telegram_webhook_url" placeholder="留空自动生成，例如: https://yourdomain.com/telegram/webhook">
+                                <small style="color:#666;font-size:12px;">留空系统将根据服务器配置自动生成 Webhook 地址</small>
+                            </div>
+                        </div>
+                        <div class="form-row" id="webhook_secret_row" style="display:none;">
+                            <div class="form-group" style="flex:1;">
+                                <label>Webhook Secret</label>
+                                <div style="display:flex;gap:8px;">
+                                    <input type="text" id="cfg_telegram_webhook_secret" placeholder="点击生成按钮自动生成" style="flex:1;">
+                                    <button type="button" class="btn" style="background:#17a2b8;color:white;white-space:nowrap;" onclick="generateWebhookSecret()">生成</button>
+                                </div>
+                                <small style="color:#666;font-size:12px;">用于验证 Telegram 推送请求的合法性，防止伪造请求</small>
                             </div>
                         </div>
                         <div id="telegramStatus" style="margin-bottom:16px;padding:12px;border-radius:8px;background:#f5f5f5;display:none;">
@@ -756,6 +791,15 @@
                     if (page === 'settings') loadSettings();
                 });
             });
+        }
+
+        function showToast(message, type = 'success') {
+            const toast = document.createElement('div');
+            const bgColor = type === 'error' ? '#f44336' : '#4caf50';
+            toast.style.cssText = `position:fixed;top:20px;right:20px;background:${bgColor};color:white;padding:12px 24px;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.15);z-index:9999;font-size:14px;transition:opacity 0.3s;`;
+            toast.textContent = message;
+            document.body.appendChild(toast);
+            setTimeout(() => { toast.style.opacity = '0'; setTimeout(() => toast.remove(), 300); }, 2500);
         }
 
         async function api(url, options = {}) {
@@ -1587,10 +1631,16 @@
                 document.getElementById('cfg_notify_retry').value = data.data.notify_retry || '5';
                 document.getElementById('cfg_system_wallet_fee_rate').value = data.data.system_wallet_fee_rate || '0.02';
                 document.getElementById('cfg_personal_wallet_fee_rate').value = data.data.personal_wallet_fee_rate || '0.01';
+                document.getElementById('cfg_telegram_enabled').value = data.data.telegram_enabled || '0';
+                document.getElementById('cfg_telegram_mode').value = data.data.telegram_mode || 'polling';
                 document.getElementById('cfg_telegram_bot_token').value = data.data.telegram_bot_token || '';
                 document.getElementById('cfg_telegram_bot_username').value = data.data.telegram_bot_username || '';
+                document.getElementById('cfg_telegram_webhook_url').value = data.data.telegram_webhook_url || '';
+                document.getElementById('cfg_telegram_webhook_secret').value = data.data.telegram_webhook_secret || '';
                 document.getElementById('cfg_service_telegram').value = data.data.service_telegram || '';
                 document.getElementById('cfg_service_discord').value = data.data.service_discord || '';
+                // 显示/隐藏 webhook URL 输入框
+                toggleWebhookUrl();
             }
         }
 
@@ -1601,8 +1651,12 @@
                 notify_retry: document.getElementById('cfg_notify_retry').value,
                 system_wallet_fee_rate: document.getElementById('cfg_system_wallet_fee_rate').value,
                 personal_wallet_fee_rate: document.getElementById('cfg_personal_wallet_fee_rate').value,
+                telegram_enabled: document.getElementById('cfg_telegram_enabled').value,
+                telegram_mode: document.getElementById('cfg_telegram_mode').value,
                 telegram_bot_token: document.getElementById('cfg_telegram_bot_token').value,
                 telegram_bot_username: document.getElementById('cfg_telegram_bot_username').value,
+                telegram_webhook_url: document.getElementById('cfg_telegram_webhook_url').value,
+                telegram_webhook_secret: document.getElementById('cfg_telegram_webhook_secret').value,
                 service_telegram: document.getElementById('cfg_service_telegram').value,
                 service_discord: document.getElementById('cfg_service_discord').value
             };
@@ -1611,10 +1665,30 @@
                 body: JSON.stringify(settings)
             });
             if (data.code === 1) {
-                alert('保存成功');
+                showToast('保存成功');
             } else {
-                alert(data.msg);
+                showToast(data.msg || '保存失败', 'error');
             }
+        }
+
+        function toggleWebhookUrl() {
+            const mode = document.getElementById('cfg_telegram_mode').value;
+            const webhookRow = document.getElementById('webhook_url_row');
+            const secretRow = document.getElementById('webhook_secret_row');
+            if (mode === 'webhook') {
+                webhookRow.style.display = 'flex';
+                secretRow.style.display = 'flex';
+            } else {
+                webhookRow.style.display = 'none';
+                secretRow.style.display = 'none';
+            }
+        }
+
+        function generateWebhookSecret() {
+            const arr = new Uint8Array(32);
+            crypto.getRandomValues(arr);
+            const secret = Array.from(arr, b => b.toString(16).padStart(2, '0')).join('');
+            document.getElementById('cfg_telegram_webhook_secret').value = secret;
         }
 
         async function testTelegramBot() {

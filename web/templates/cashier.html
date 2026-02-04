@@ -363,10 +363,10 @@
             </div>
 
             <div class="address-container">
-                <div class="address-label" style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
-                    <span data-i18n="cashier.paymentAddress">收款地址 (请确认网络正确)</span>
-                    <div style="padding: 4px 10px; background: #f0f0f0; border-radius: 6px;">
-                        <span style="color: #666; font-size: 13px;">网络:</span>
+                <div class="address-label" style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; gap: 8px;">
+                    <span data-i18n="cashier.paymentAddress" style="flex-shrink: 1; min-width: 0;">收款地址 (请确认网络正确)</span>
+                    <div style="padding: 4px 10px; background: #f0f0f0; border-radius: 6px; display: flex; align-items: center; white-space: nowrap; flex-shrink: 0;">
+                        <span style="color: #666; font-size: 13px;" data-i18n="cashier.network">网络</span><span style="color: #666; font-size: 13px;">:</span>
                         <span class="chain-badge {{.order.Chain}}" style="margin-left: 6px;">{{.order.Chain}}</span>
                     </div>
                 </div>
@@ -557,12 +557,28 @@
         updateCountdown();
         setInterval(updateCountdown, 1000);
 
-        // 轮询检查支付状态
+        // 轮询检查支付状态 - 使用指数退避策略
+        let pollInterval = 3000; // 初始间隔3秒
+        let pollCount = 0;
+        let maxPolls = 600; // 最多轮询600次（约30分钟）
+        let pollTimer = null;
+
         function checkStatus() {
+            if (pollCount >= maxPolls) {
+                console.log('达到最大轮询次数，停止轮询');
+                if (pollTimer) clearTimeout(pollTimer);
+                return;
+            }
+
+            pollCount++;
+
             fetch('/api/check_order?trade_no=' + tradeNo)
                 .then(response => response.json())
                 .then(data => {
                     if (data.paid) {
+                        // 支付成功，停止轮询
+                        if (pollTimer) clearTimeout(pollTimer);
+
                         document.getElementById('payContent').style.display = 'none';
                         document.getElementById('paidContent').style.display = 'block';
 
@@ -572,16 +588,37 @@
                             }, 2000);
                         }
                     } else if (data.status === 2) {
-                        // 已过期
+                        // 已过期，停止轮询
+                        if (pollTimer) clearTimeout(pollTimer);
+
                         document.getElementById('payContent').style.display = 'none';
                         document.getElementById('expiredContent').style.display = 'block';
+                    } else {
+                        // 未支付，继续轮询，使用指数退避策略
+                        // 前10次：3秒间隔
+                        // 10-30次：5秒间隔
+                        // 30-60次：10秒间隔
+                        // 60次后：15秒间隔
+                        if (pollCount > 60) {
+                            pollInterval = 15000;
+                        } else if (pollCount > 30) {
+                            pollInterval = 10000;
+                        } else if (pollCount > 10) {
+                            pollInterval = 5000;
+                        }
+
+                        pollTimer = setTimeout(checkStatus, pollInterval);
                     }
                 })
-                .catch(console.error);
+                .catch(err => {
+                    console.error('查询订单状态失败:', err);
+                    // 出错时使用更长的间隔重试
+                    pollTimer = setTimeout(checkStatus, Math.min(pollInterval * 2, 30000));
+                });
         }
 
-        // 每3秒检查一次状态
-        setInterval(checkStatus, 3000);
+        // 启动首次检查
+        checkStatus();
     </script>
 </body>
 </html>

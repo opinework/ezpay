@@ -35,11 +35,11 @@ if [ "$(id -u)" -eq 0 ] && ! git config --global --get-all safe.directory | grep
     git config --global --add safe.directory "$PROJECT_DIR"
 fi
 VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "dev-$(date +%Y%m%d-%H%M%S)")
-BUILD_TIME=$(date +%Y%m%d%H%M%S)
-LDFLAGS="-s -w -X main.Version=${VERSION} -X main.BuildTime=${BUILD_TIME}"
+BUILDDATE=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
+LDFLAGS="-s -w -X main.Version=${VERSION} -X 'main.BuildDate=$BUILDDATE'"
 
 echo -e "${BLUE}Version: $VERSION${NC}"
-echo -e "${BLUE}Build time: $BUILD_TIME${NC}"
+echo -e "${BLUE}Build date: $BUILDDATE${NC}"
 echo ""
 
 # Define platforms
@@ -70,6 +70,7 @@ for PLATFORM in "${!PLATFORMS[@]}"; do
 
     # Build binary
     echo -e "${YELLOW}Compiling binary...${NC}"
+    cd "$PROJECT_DIR"
     if CGO_ENABLED=0 GOOS=$GOOS GOARCH=$GOARCH go build \
         -buildvcs=false \
         -trimpath \

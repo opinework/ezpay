@@ -11,18 +11,18 @@ set -e
 # =============================================================================
 
 # Go 编译器路径
-GO="/Volumes/mindata/Library/go/bin/go"
+GO="/usr/bin/go"
 
 # 项目信息
 APP_NAME="ezpay"
 VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "dev")
-BUILD_TIME=$(date +%Y%m%d%H%M%S)
+BUILDDATE=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
 
 # 输出目录
 RELEASE_DIR="release"
 
 # 编译参数
-LDFLAGS="-s -w -X main.Version=${VERSION} -X main.BuildTime=${BUILD_TIME}"
+LDFLAGS="-s -w -X main.Version=${VERSION} -X 'main.BuildDate=$BUILDDATE'"
 
 # 颜色输出
 RED='\033[0;31m'
@@ -95,7 +95,7 @@ main() {
     print_header "EzPay Cross-Platform Build Script"
     echo ""
     echo "Version: $VERSION"
-    echo "Build Time: $BUILD_TIME"
+    echo "Build Date: $BUILDDATE"
     echo ""
 
     # 检查 Go

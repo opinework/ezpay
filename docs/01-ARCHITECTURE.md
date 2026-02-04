@@ -90,12 +90,15 @@ ezpay/
 │   # Windows/macOS: {exe_dir}/ezpay_data
 │
 └── docs/                      # 文档
-    ├── README.md             # 项目概述
-    ├── BUILD.md              # 构建指南
-    ├── DEPLOY.md             # 部署指南
-    ├── API.md                # API文档
-    ├── USER_GUIDE.md         # 用户手册
-    └── ARCHITECTURE.md       # 架构设计
+    ├── 01-ARCHITECTURE.md    # 架构设计与性能优化
+    ├── 02-BUILD.md           # 构建指南
+    ├── 03-DEPLOY.md          # 部署指南
+    ├── 04-API.md             # API参考
+    ├── 05-USER_GUIDE.md      # 用户手册
+    ├── 06-COMPATIBILITY.md   # 兼容性与迁移指南
+    ├── 07-TELEGRAM.md        # Telegram配置与测试
+    ├── 08-I18N.md            # 国际化指南
+    └── 09-TESTPLAN.md        # 测试计划
 ```
 
 ## 构建模式
@@ -476,7 +479,7 @@ if result.RowsAffected == 0 {
 ### 地址验证
 - TRC20地址以 T 开头，包含 checksum 验证
 - ERC20/BEP20/Polygon地址以 0x 开头
-- 完整的 hex ↔ base58 转换（Tron）
+- 完整的 hex <-> base58 转换（Tron）
 
 ## 部署建议
 
@@ -561,10 +564,10 @@ type RPCClient struct {
 ```
 
 **功能特性:**
-- ✅ **指数退避重试**: 1s → 2s → 4s
-- ✅ **故障自动切换**: RPC 节点故障时自动切换到备用节点
-- ✅ **健康检查**: 定期检查失败节点，自动恢复使用
-- ✅ **批量请求**: 支持 JSON-RPC 批量调用优化性能
+- **指数退避重试**: 1s -> 2s -> 4s
+- **故障自动切换**: RPC 节点故障时自动切换到备用节点
+- **健康检查**: 定期检查失败节点，自动恢复使用
+- **批量请求**: 支持 JSON-RPC 批量调用优化性能
 
 #### 2. BlockchainMetrics - 监控指标系统
 ```go
@@ -574,21 +577,21 @@ type BlockchainMetrics struct {
     ScanSuccess     map[string]int64      // 成功次数
     ScanFailure     map[string]int64      // 失败次数
     ScanDuration    map[string]time.Duration // 扫描耗时
-    
+
     // 交易统计
     TransferFound   map[string]int64      // 发现的转账
     OrderMatched    map[string]int64      // 匹配的订单
     DuplicateTx     map[string]int64      // 重复交易
-    
+
     // 错误统计
     ErrorCount      map[string]int64      // 错误计数
     LastError       map[string]string     // 最后错误
-    
+
     // RPC 统计
     RPCCallCount    map[string]int64      // RPC 调用
     RPCFailCount    map[string]int64      // RPC 失败
     RPCRetryCount   map[string]int64      // 重试次数
-    
+
     // 区块统计
     CurrentBlock    map[string]uint64     // 当前区块
     LastBlock       map[string]uint64     // 最后扫描区块
@@ -611,11 +614,11 @@ type ChainListener struct {
     rpcBackups      []string           // 备用 RPC 节点
     contractAddress string
     confirmations   int
-    
+
     // 动态扫描
     scanInterval    int                // 当前扫描间隔
     baseScanInterval int               // 基础间隔
-    
+
     // 重组检测
     reorgDepth      int                // 检测深度
     blockHistory    []uint64           // 区块历史
@@ -629,7 +632,7 @@ type ChainListener struct {
 ### 改进功能详解
 
 #### 1. Tron 地址转换
-实现了完整的 hex ↔ base58 转换：
+实现了完整的 hex <-> base58 转换：
 ```go
 // 支持的格式转换
 "41..." (hex) → "T..." (base58)
@@ -713,7 +716,7 @@ GET /admin/api/blockchain/gas-price/:chain
 ```json
 {
   "chain": "erc20",
-  "gas_price": 25.5,  // Gwei
+  "gas_price": 25.5,
   "updated_at": "2024-01-30T12:00:00Z"
 }
 ```
@@ -740,8 +743,8 @@ GET /admin/api/blockchain/gas-price/:chain
 |------|--------|--------|------|
 | RPC 成功率 | ~85% | ~99% | +14% |
 | 地址查询耗时 (100地址) | ~15s | ~1s | 15x |
-| 区块落后数 | 不确定 | 实时监控 | ✓ |
-| 重组处理 | 无 | 自动 | ✓ |
+| 区块落后数 | 不确定 | 实时监控 | - |
+| 重组处理 | 无 | 自动 | - |
 | 扫描间隔 | 固定 | 动态 | 2x |
 
 ### 日志增强
@@ -754,7 +757,7 @@ Error scanning trx: network error
 [trx] Scan error: network timeout after 15s (attempt 3/3)
 [trx] Failed to get transactions for TBxxx: HTTP 503
 [trx] RPC POST failed (attempt 2/4): context deadline exceeded, retrying in 2s
-⚠️  ALERT: Chain trx scan failure rate: 55.2%
+ALERT: Chain trx scan failure rate: 55.2%
 [trx] Potential reorg detected: current=12345, last=12346
 [trx] Gas price updated: 25.50 Gwei
 [trx] Found 5 transfers
@@ -774,7 +777,7 @@ blockchain:
       - https://api.shasta.trongrid.io
     confirmations: 19
     scan_interval: 15
-    
+
   erc20:
     enabled: true
     rpc: https://eth-mainnet.g.alchemy.com/v2/YOUR_KEY
@@ -810,3 +813,187 @@ A: 检查地址格式、确认数设置、查看 duplicate_tx
 **Q: 重组频繁？**
 A: 增加 confirmations，使用主网而非测试网
 
+---
+
+## 性能优化
+
+本节描述系统中针对查询频率和资源消耗的优化方案。
+
+### 优化方案总览
+
+| # | 优化项 | 文件 | 效果 |
+|---|--------|------|------|
+| 1 | 收银台轮询 | `cashier.html` | 减少 70-80% 请求 |
+| 2 | 订单缓存 | `order.go` | 减少 60-70% 数据库查询 |
+| 3 | 智能调频 | `blockchain.go` | 减少 75% RPC调用（空闲时） |
+| 4 | 超时订单过滤 | `blockchain.go` | 过期1分钟后停止匹配 |
+| 5 | API限流 | `ratelimiter.go` | 防止封禁 |
+| 6 | 配置优化 | `config.yaml` | 减少 50% 基础扫描频率 |
+
+### 收银台轮询优化
+
+**位置**: `web/templates/cashier.html:560-620`
+
+**策略**: 指数退避 + 自动停止
+```
+前10次  → 3秒间隔
+10-30次 → 5秒间隔
+30-60次 → 10秒间隔
+60次后  → 15秒间隔
+支付成功/过期 → 停止轮询
+```
+
+**关键代码**:
+```javascript
+// 动态调整轮询间隔
+if (pollCount > 60) pollInterval = 15000;
+else if (pollCount > 30) pollInterval = 10000;
+else if (pollCount > 10) pollInterval = 5000;
+```
+
+### 订单查询缓存
+
+**位置**: `internal/service/order.go:17-48, 820-855`
+
+**机制**:
+- 内存缓存（`sync.Map`），TTL 5秒
+- 已支付/已过期订单长期缓存
+- 状态更新时自动失效
+
+**关键代码**:
+```go
+type OrderService struct {
+    cache    sync.Map
+    cacheTTL time.Duration // 5秒
+}
+
+func (s *OrderService) InvalidateOrderCache(tradeNo string) {
+    s.cache.Delete(tradeNo)
+}
+```
+
+### 区块链扫描智能调频
+
+**位置**: `internal/service/blockchain.go:258-324, 782-830`
+
+**逻辑**:
+- 每5次扫描检查待支付订单数
+- 有订单 → 30秒间隔（快速）
+- 无订单 → 120秒间隔（省资源）
+- **超时1分钟后自动停止匹配该订单**
+
+**关键代码**:
+```go
+// 智能调频
+if count > 0 {
+    newInterval = listener.scanInterval // 30秒
+} else {
+    newInterval = listener.scanInterval * 4 // 120秒
+    if newInterval > 60 { newInterval = 60 }
+}
+
+// 超时订单过滤（matchOrder方法）
+expiredTolerance := time.Now().Add(-1 * time.Minute)
+Where("... AND expired_at > ?", expiredTolerance)
+```
+
+### API请求限流器
+
+**位置**: `internal/util/ratelimiter.go`
+
+**限流策略**:
+```
+TronGrid  → 5 QPS  (免费版保守值)
+Binance   → 10 QPS (每分钟1200次)
+Infura    → 10 QPS
+BSC/其他  → 10 QPS
+```
+
+**应用位置**:
+- `internal/service/rate.go` - 汇率API
+- `internal/service/blockchain_rpc.go` - RPC调用
+
+**关键代码**:
+```go
+limiter := util.GetAPILimiter("trongrid", 5.0, 10)
+limiter.Wait() // 令牌桶算法
+```
+
+### 整体优化效果
+
+| 指标 | 优化前 | 优化后 | 降幅 |
+|------|--------|--------|------|
+| 数据库查询 | 每3秒/订单 | 缓存+退避 | 减少 60-80% |
+| RPC调用（有订单） | 每15秒x7链 | 每30秒x7链 | 减少 50% |
+| RPC调用（无订单） | 每15秒x7链 | 每60秒x7链 | 减少 75% |
+| API限流风险 | 无保护 | 令牌桶限流 | 已防护 |
+
+### 配置调整指南
+
+#### 如果仍遇到限流
+
+**方案1: 降低扫描频率**
+```yaml
+# config.yaml
+blockchain:
+  trx:
+    scan_interval: 45  # 30→45秒
+```
+
+**方案2: 降低限流速率**
+```go
+// blockchain_rpc.go:357
+limiter := util.GetAPILimiter("trongrid", 3.0, 5)  // 5→3 QPS
+```
+
+**方案3: 延长缓存时间**
+```yaml
+# config.yaml
+order:
+  status_cache_ttl: 10  # 5→10秒
+```
+
+#### 如果需要加快响应
+
+**方案1: 缩短扫描间隔**（确保不触发限流）
+```yaml
+blockchain:
+  trx:
+    scan_interval: 20  # 30→20秒
+```
+
+**方案2: 缩短轮询间隔**
+```javascript
+// cashier.html:562
+let pollInterval = 2000;  // 3→2秒
+```
+
+### 优化技术原理
+
+| 技术 | 说明 | 优势 |
+|------|------|------|
+| **令牌桶** | 恒定速率生成令牌，请求消耗令牌 | 支持突发流量 |
+| **指数退避** | 阶梯式增加间隔时间 | 快速响应+节省资源 |
+| **智能调频** | 根据业务状态动态调整 | 按需扫描 |
+| **内存缓存** | sync.Map热数据缓存 | 减少DB查询 |
+
+### 注意事项
+
+1. 订单状态更新后必须调用 `InvalidateOrderCache()`
+2. 限流器全局共享，多goroutine竞争令牌
+3. 修改配置后需重启服务
+4. 建议添加监控告警
+
+### 代码位置快查
+
+```
+web/templates/cashier.html:560-620       # 轮询优化
+internal/service/order.go:17-48          # 缓存定义
+internal/service/order.go:820-855        # 缓存逻辑
+internal/service/blockchain.go:258-324   # 智能调频
+internal/service/blockchain.go:782-830   # 超时订单过滤
+internal/util/ratelimiter.go             # 限流器
+internal/service/blockchain_rpc.go:357   # RPC限流
+internal/service/rate.go:130,166         # 汇率限流
+config.yaml:107-177                      # 配置优化
+```

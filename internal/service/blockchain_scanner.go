@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"strings"
+	"time"
 
 	"ezpay/internal/model"
 
@@ -30,11 +31,11 @@ func (s *BlockchainService) scanTRXImproved(listener *ChainListener, addresses m
 			s.metrics.RecordRPCCall("trx", false, 0)
 			continue
 		}
-		defer resp.Body.Close()
 
 		s.metrics.RecordRPCCall("trx", true, 0)
 
 		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
 		if err != nil {
 			log.Printf("[trx] Failed to read response for %s: %v", addr, err)
 			continue
@@ -110,6 +111,7 @@ func (s *BlockchainService) scanTRXImproved(listener *ChainListener, addresses m
 			if strings.HasPrefix(fromAddr, "41") {
 				fromAddr = hexToBase58(fromAddr)
 			}
+			fromAddr = strings.ToLower(fromAddr)
 
 			transfers = append(transfers, Transfer{
 				TxHash:      tx.TxID,
@@ -142,11 +144,11 @@ func (s *BlockchainService) scanTRC20Improved(listener *ChainListener, addresses
 			s.metrics.RecordRPCCall("trc20", false, 0)
 			continue
 		}
-		defer resp.Body.Close()
 
 		s.metrics.RecordRPCCall("trc20", true, 0)
 
 		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
 		if err != nil {
 			log.Printf("[trc20] Failed to read response for %s: %v", addr, err)
 			continue
@@ -229,6 +231,15 @@ func (s *BlockchainService) scanEVMImproved(listener *ChainListener, addresses m
 		return nil, nil
 	}
 
+	// 限制单次查询的区块范围，避免 RPC 节点报 "Block range is too large"
+	maxBlockRange := uint64(1000)
+	queryToBlock := safeBlock
+	if queryToBlock-listener.lastBlock > maxBlockRange {
+		queryToBlock = listener.lastBlock + maxBlockRange
+		log.Printf("[%s] 区块范围过大，限制本次查询: %d -> %d (剩余 %d 块待追赶)",
+			listener.chain, listener.lastBlock+1, queryToBlock, safeBlock-queryToBlock)
+	}
+
 	// Transfer事件签名
 	transferTopic := "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
 
@@ -247,7 +258,7 @@ func (s *BlockchainService) scanEVMImproved(listener *ChainListener, addresses m
 			Params: []interface{}{
 				map[string]interface{}{
 					"fromBlock": fmt.Sprintf("0x%x", listener.lastBlock+1),
-					"toBlock":   fmt.Sprintf("0x%x", safeBlock),
+					"toBlock":   fmt.Sprintf("0x%x", queryToBlock),
 					"address":   listener.contractAddress,
 					"topics": []interface{}{
 						transferTopic,
@@ -261,69 +272,83 @@ func (s *BlockchainService) scanEVMImproved(listener *ChainListener, addresses m
 		requestID++
 	}
 
-	// 批量发送请求
+	// 批量发送请求（分批，每批最多5个，避免触发速率限制）
+	maxBatchSize := 5
 	if len(batchRequests) > 0 {
-		responses, err := rpcClient.BatchPostJSON("", batchRequests)
-		if err != nil {
-			log.Printf("[%s] Batch RPC call failed: %v", listener.chain, err)
-			s.metrics.RecordRPCCall(listener.chain, false, 0)
-			return nil, err
-		}
+		for i := 0; i < len(batchRequests); i += maxBatchSize {
+			end := i + maxBatchSize
+			if end > len(batchRequests) {
+				end = len(batchRequests)
+			}
+			chunk := batchRequests[i:end]
 
-		s.metrics.RecordRPCCall(listener.chain, true, 0)
-
-		// 处理批量响应
-		for _, resp := range responses {
-			if resp.Error != nil {
-				log.Printf("[%s] RPC error in batch response: %s", listener.chain, resp.Error.Message)
-				continue
+			responses, err := rpcClient.BatchPostJSON("", chunk)
+			if err != nil {
+				log.Printf("[%s] Batch RPC call failed: %v", listener.chain, err)
+				s.metrics.RecordRPCCall(listener.chain, false, 0)
+				return nil, err
 			}
 
-			var logs []struct {
-				TransactionHash string   `json:"transactionHash"`
-				Topics          []string `json:"topics"`
-				Data            string   `json:"data"`
-				BlockNumber     string   `json:"blockNumber"`
-			}
+			s.metrics.RecordRPCCall(listener.chain, true, 0)
 
-			if err := json.Unmarshal(resp.Result, &logs); err != nil {
-				log.Printf("[%s] Failed to unmarshal logs: %v", listener.chain, err)
-				continue
-			}
-
-			for _, logEntry := range logs {
-				// 解析from地址
-				from := "0x" + logEntry.Topics[1][26:]
-
-				// 解析to地址
-				to := "0x" + logEntry.Topics[2][26:]
-
-				// 解析金额
-				amount := parseHexAmount(logEntry.Data, 6) // USDT精度是6位
-
-				// 检查是否已处理
-				var count int64
-				model.GetDB().Model(&model.TransactionLog{}).Where("tx_hash = ?", logEntry.TransactionHash).Count(&count)
-				if count > 0 {
-					s.metrics.RecordDuplicateTx(listener.chain)
+			// 处理批量响应
+			for _, resp := range responses {
+				if resp.Error != nil {
+					log.Printf("[%s] RPC error in batch response: %s", listener.chain, resp.Error.Message)
 					continue
 				}
 
-				blockNum := parseHexUint64(logEntry.BlockNumber)
+				var logs []struct {
+					TransactionHash string   `json:"transactionHash"`
+					Topics          []string `json:"topics"`
+					Data            string   `json:"data"`
+					BlockNumber     string   `json:"blockNumber"`
+				}
 
-				transfers = append(transfers, Transfer{
-					TxHash:      logEntry.TransactionHash,
-					From:        from,
-					To:          to,
-					Amount:      amount,
-					BlockNumber: blockNum,
-					Chain:       listener.chain,
-				})
+				if err := json.Unmarshal(resp.Result, &logs); err != nil {
+					log.Printf("[%s] Failed to unmarshal logs: %v", listener.chain, err)
+					continue
+				}
+
+				for _, logEntry := range logs {
+					// 解析from地址
+					from := "0x" + logEntry.Topics[1][26:]
+
+					// 解析to地址
+					to := "0x" + logEntry.Topics[2][26:]
+
+					// 解析金额
+					amount := parseHexAmount(logEntry.Data, 6) // USDT精度是6位
+
+					// 检查是否已处理
+					var count int64
+					model.GetDB().Model(&model.TransactionLog{}).Where("tx_hash = ?", logEntry.TransactionHash).Count(&count)
+					if count > 0 {
+						s.metrics.RecordDuplicateTx(listener.chain)
+						continue
+					}
+
+					blockNum := parseHexUint64(logEntry.BlockNumber)
+
+					transfers = append(transfers, Transfer{
+						TxHash:      logEntry.TransactionHash,
+						From:        from,
+						To:          to,
+						Amount:      amount,
+						BlockNumber: blockNum,
+						Chain:       listener.chain,
+					})
+				}
+			}
+
+			// 批次之间短暂等待，避免触发速率限制
+			if end < len(batchRequests) {
+				time.Sleep(200 * time.Millisecond)
 			}
 		}
 	}
 
-	listener.lastBlock = safeBlock
+	listener.lastBlock = queryToBlock
 	return transfers, nil
 }
 

@@ -395,7 +395,7 @@
 
 #### 接入文档
 
-详见 [API.md](./API.md)
+详见 [04-API.md](./04-API.md)
 
 **彩虹易支付兼容接口：**
 - 发起支付：`/submit.php` 或 `/api/submit`

@@ -109,6 +109,7 @@
             await this.loadLocale(locale);
             this.applyDirection();
             this.translatePage();
+            this.updateLanguageSelectors();
 
             // 触发自定义事件
             window.dispatchEvent(new CustomEvent('localeChanged', { detail: { locale } }));
@@ -214,6 +215,35 @@
             html += `</div></div>`;
 
             container.innerHTML = html;
+        },
+
+        // 更新所有语言选择器的显示状态
+        updateLanguageSelectors: function() {
+            const currentLang = this.supportedLocales[this.locale];
+            if (!currentLang) return;
+
+            // 更新按钮上显示的语言名称
+            document.querySelectorAll('.lang-current').forEach(el => {
+                el.textContent = currentLang.name;
+            });
+
+            // 更新菜单项的 active 状态
+            document.querySelectorAll('.lang-option').forEach(el => {
+                const onclick = el.getAttribute('onclick') || '';
+                const match = onclick.match(/setLocale\('([^']+)'\)/);
+                if (match) {
+                    if (match[1] === this.locale) {
+                        el.classList.add('active');
+                    } else {
+                        el.classList.remove('active');
+                    }
+                }
+            });
+
+            // 关闭打开的菜单
+            document.querySelectorAll('.lang-menu.show').forEach(m => {
+                m.classList.remove('show');
+            });
         },
 
         // 切换语言菜单显示

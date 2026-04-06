@@ -1,0 +1,101 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and Release All Packages
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Get version
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libarchive-tools zstd dpkg-dev fakeroot zip
+
+      - name: Build Tarball packages
+        run: bash pkg/tarball/build-multiarch.sh
+
+      - name: Build Arch Linux packages
+        run: bash pkg/archlinux/build-multiarch.sh
+
+      - name: Build Debian packages
+        run: bash pkg/debian/build-multiarch.sh
+
+      - name: Prepare release artifacts
+        run: |
+          mkdir -p release-artifacts
+
+          # Copy all packages (exclude intermediate checksums)
+          find release -type f \( -name "*.tar.gz" -o -name "*.zip" -o -name "*.deb" -o -name "*.pkg.tar.zst" \) -exec cp {} release-artifacts/ \;
+
+          # Generate combined checksums
+          cd release-artifacts
+          sha256sum * > CHECKSUMS.txt
+
+          echo "Release artifacts:"
+          ls -lh
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Release ${{ steps.version.outputs.VERSION }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          body: |
+            ## EzPay ${{ steps.version.outputs.VERSION }}
+
+            ### Package Formats
+
+            **Tarball (Universal):**
+            - Linux (amd64, arm64)
+            - macOS (amd64 Intel, arm64 Apple Silicon)
+            - Windows (amd64)
+
+            **Arch Linux:**
+            - x86_64, aarch64
+
+            **Debian/Ubuntu:**
+            - amd64, arm64
+
+            ### Installation
+
+            **Tarball:**
+            ```bash
+            tar -xzf ezpay-*-linux-amd64.tar.gz
+            cd ezpay-*-linux-amd64
+            ./ezpay
+            ```
+
+            **Arch Linux:**
+            ```bash
+            sudo pacman -U ezpay-*.pkg.tar.zst
+            ```
+
+            **Debian/Ubuntu:**
+            ```bash
+            sudo dpkg -i ezpay_*_amd64.deb
+            sudo apt-get install -f
+            ```
+          files: release-artifacts/*

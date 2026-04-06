@@ -1,0 +1,15 @@
+Source: ezpay
+Section: net
+Priority: optional
+Maintainer: Your Name <your.email@example.com>
+Build-Depends: debhelper (>= 12), golang-go (>= 2:1.21)
+Standards-Version: 4.5.1
+Homepage: https://github.com/yourusername/ezpay
+
+Package: ezpay
+Architecture: amd64 arm64
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Description: EzPay - A lightweight payment gateway
+ A multi-chain cryptocurrency payment gateway supporting USDT (TRC20/ERC20/BEP20),
+ TRX, WeChat Pay and Alipay. Features include automatic exchange rate updates,
+ wallet rotation, Telegram notifications and more.

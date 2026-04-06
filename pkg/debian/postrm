@@ -1,0 +1,30 @@
+#!/bin/bash
+set -e
+
+case "$1" in
+    purge)
+        # Remove user and group
+        if getent passwd ezpay >/dev/null; then
+            userdel ezpay || true
+        fi
+        if getent group ezpay >/dev/null; then
+            groupdel ezpay || true
+        fi
+        # Remove data directories
+        rm -rf /var/lib/ezpay
+        rm -rf /var/log/ezpay
+        rm -rf /etc/ezpay
+        ;;
+
+    remove|upgrade|failed-upgrade|abort-install|abort-upgrade|disappear)
+        ;;
+
+    *)
+        echo "postrm called with unknown argument \`$1'" >&2
+        exit 1
+        ;;
+esac
+
+#DEBHELPER#
+
+exit 0

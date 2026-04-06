@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title data-i18n-document-title="cashier.paymentSuccess">支付成功</title>
+    <link rel="stylesheet" href="/static/css/i18n.css">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+        .container {
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+            max-width: 400px;
+            width: 100%;
+            padding: 40px;
+            text-align: center;
+        }
+        .top-bar {
+            position: absolute;
+            top: 16px;
+            right: 16px;
+        }
+        [dir="rtl"] .top-bar {
+            right: auto;
+            left: 16px;
+        }
+        .icon {
+            width: 80px;
+            height: 80px;
+            background: #4caf50;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 24px;
+        }
+        .icon svg {
+            width: 40px;
+            height: 40px;
+            fill: white;
+        }
+        h1 {
+            font-size: 24px;
+            color: #333;
+            margin-bottom: 12px;
+        }
+        p {
+            color: #666;
+            font-size: 16px;
+            line-height: 1.5;
+        }
+        .order-info {
+            margin-top: 24px;
+            text-align: left;
+            background: #f5f5f5;
+            padding: 16px;
+            border-radius: 8px;
+        }
+        [dir="rtl"] .order-info {
+            text-align: right;
+        }
+        .info-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            font-size: 14px;
+        }
+        [dir="rtl"] .info-row {
+            flex-direction: row-reverse;
+        }
+        .info-label {
+            color: #666;
+        }
+        .info-value {
+            color: #333;
+            font-weight: 500;
+        }
+        .top-bar .lang-selector .lang-btn {
+            background: rgba(255,255,255,0.2);
+            border: none;
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <div class="top-bar">
+        <div id="langSelector"></div>
+    </div>
+    <div class="container">
+        <div class="icon">
+            <svg viewBox="0 0 24 24">
+                <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>
+            </svg>
+        </div>
+        <h1 data-i18n="cashier.paymentSuccess">支付成功</h1>
+        <p data-i18n="success.message">您的订单已支付完成</p>
+
+        <div class="order-info">
+            <div class="info-row">
+                <span class="info-label" data-i18n="cashier.orderNo">订单号</span>
+                <span class="info-value">{{.order.TradeNo}}</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label" data-i18n="order.usdtAmount">支付金额</span>
+                <span class="info-value">{{.order.USDTAmount}} USDT</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label" data-i18n="order.paidTime">支付时间</span>
+                <span class="info-value">{{.order.PaidAt.Format "2006-01-02 15:04:05"}}</span>
+            </div>
+        </div>
+    </div>
+    <script src="/static/js/i18n.js"></script>
+    <script>
+        I18n.init().then(() => {
+            I18n.createLanguageSelector('langSelector', 'compact');
+        });
+    </script>
+</body>
+</html>

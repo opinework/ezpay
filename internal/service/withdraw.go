@@ -3,6 +3,7 @@ package service
 import (
 	"errors"
 	"fmt"
+	"strconv"
 	"sync"
 	"time"
 
@@ -36,20 +37,32 @@ func (s *WithdrawService) CreateWithdrawal(merchantID uint, req *WithdrawRequest
 		return nil, errors.New("商户不存在")
 	}
 
-	// 检查可用余额（USD）
-	availableBalance := merchant.Balance - merchant.FrozenBalance
-	if req.Amount > availableBalance {
+	// 解析金额（优先使用字符串避免 float64 精度丢失）
+	var reqAmount decimal.Decimal
+	if req.AmountStr != "" {
+		var parseErr error
+		reqAmount, parseErr = decimal.NewFromString(req.AmountStr)
+		if parseErr != nil {
+			return nil, errors.New("金额格式无效")
+		}
+	} else {
+		reqAmount = decimal.NewFromFloat(req.Amount)
+	}
+	reqAmount = reqAmount.Round(2)
+	availableBalance := merchant.Balance.Sub(merchant.FrozenBalance)
+	if reqAmount.GreaterThan(availableBalance) {
 		return nil, errors.New("可用余额不足")
 	}
 
 	// 最低提现金额检查: 50 USD
-	if req.Amount < 50 {
+	minAmount := decimal.NewFromInt(50)
+	if reqAmount.LessThan(minAmount) {
 		return nil, errors.New("最低提现金额为 50 USD")
 	}
 
-	// 固定手续费: 1 USD
-	fee := 1.0
-	realAmount := req.Amount - fee
+	// 手续费（从配置获取，默认 1 USD）
+	fee := s.getWithdrawFee()
+	realAmount := reqAmount.Sub(fee)
 
 	// 验证提现地址
 	if req.AddressID == 0 {
@@ -69,7 +82,7 @@ func (s *WithdrawService) CreateWithdrawal(merchantID uint, req *WithdrawRequest
 	// 创建提现记录
 	withdrawal := &model.Withdrawal{
 		MerchantID:  merchantID,
-		Amount:      req.Amount,
+		Amount:      reqAmount,
 		Fee:         fee,
 		RealAmount:  realAmount,
 		PayMethod:   address.Chain,
@@ -82,10 +95,15 @@ func (s *WithdrawService) CreateWithdrawal(merchantID uint, req *WithdrawRequest
 
 	// 开启事务
 	err := model.GetDB().Transaction(func(tx *gorm.DB) error {
-		// 冻结余额
-		if err := tx.Model(&model.Merchant{}).Where("id = ?", merchantID).
-			Update("frozen_balance", gorm.Expr("frozen_balance + ?", req.Amount)).Error; err != nil {
-			return err
+		// 冻结余额（原子检查可用余额）
+		freezeResult := tx.Model(&model.Merchant{}).
+			Where("id = ? AND (balance - frozen_balance) >= ?", merchantID, reqAmount.String()).
+			Update("frozen_balance", gorm.Expr("frozen_balance + ?", reqAmount.String()))
+		if freezeResult.Error != nil {
+			return freezeResult.Error
+		}
+		if freezeResult.RowsAffected == 0 {
+			return errors.New("可用余额不足")
 		}
 
 		// 创建提现记录
@@ -108,8 +126,9 @@ func (s *WithdrawService) CreateWithdrawal(merchantID uint, req *WithdrawRequest
 
 // WithdrawRequest 提现请求
 type WithdrawRequest struct {
-	Amount    float64 `json:"amount" binding:"required,gt=0"`
-	AddressID uint    `json:"address_id" binding:"required"` // 提现地址ID
+	Amount    float64 `json:"amount" binding:"required,gt=0"` // JSON 解析用 float64，内部转 decimal
+	AmountStr string  `json:"amount_str"`                     // 高精度金额（优先使用）
+	AddressID uint    `json:"address_id" binding:"required"`  // 提现地址ID
 	Remark    string  `json:"remark"`
 }
 
@@ -170,26 +189,29 @@ func (s *WithdrawService) ApproveWithdrawal(id uint, adminRemark string) error {
 	// 使用卖出汇率转换
 	rateService := GetRateService()
 	result, err := rateService.ConvertFromSettlementCurrency(
-		decimal.NewFromFloat(withdrawal.RealAmount),
+		withdrawal.RealAmount,
 		payoutCurrency,
 	)
 	if err != nil {
 		return errors.New("计算打款金额失败: " + err.Error())
 	}
 
-	payoutAmount, _ := result.Amount.Float64()
-	payoutRate, _ := result.Rate.Float64()
-
 	now := time.Now()
-	if err := model.GetDB().Model(&withdrawal).Updates(map[string]interface{}{
-		"status":          model.WithdrawStatusApproved,
-		"admin_remark":    adminRemark,
-		"processed_at":    &now,
-		"payout_amount":   payoutAmount,
-		"payout_currency": payoutCurrency,
-		"payout_rate":     payoutRate,
-	}).Error; err != nil {
-		return err
+	approveResult := model.GetDB().Model(&withdrawal).
+		Where("status = ?", model.WithdrawStatusPending).
+		Updates(map[string]interface{}{
+			"status":          model.WithdrawStatusApproved,
+			"admin_remark":    adminRemark,
+			"processed_at":    &now,
+			"payout_amount":   result.Amount,
+			"payout_currency": payoutCurrency,
+			"payout_rate":     result.Rate,
+		})
+	if approveResult.Error != nil {
+		return approveResult.Error
+	}
+	if approveResult.RowsAffected == 0 {
+		return errors.New("该提现申请已被其他管理员处理")
 	}
 
 	// 发送Telegram通知 - 提现审批通过
@@ -213,18 +235,24 @@ func (s *WithdrawService) RejectWithdrawal(id uint, adminRemark string) error {
 
 	// 开启事务
 	err := model.GetDB().Transaction(func(tx *gorm.DB) error {
-		// 更新状态
-		if err := tx.Model(&withdrawal).Updates(map[string]interface{}{
-			"status":       model.WithdrawStatusRejected,
-			"admin_remark": adminRemark,
-			"processed_at": &now,
-		}).Error; err != nil {
-			return err
+		// 更新状态（乐观锁防止并发重复处理）
+		rejectResult := tx.Model(&withdrawal).
+			Where("status = ?", model.WithdrawStatusPending).
+			Updates(map[string]interface{}{
+				"status":       model.WithdrawStatusRejected,
+				"admin_remark": adminRemark,
+				"processed_at": &now,
+			})
+		if rejectResult.Error != nil {
+			return rejectResult.Error
+		}
+		if rejectResult.RowsAffected == 0 {
+			return errors.New("该提现申请已被其他管理员处理")
 		}
 
 		// 解冻余额
 		if err := tx.Model(&model.Merchant{}).Where("id = ?", withdrawal.MerchantID).
-			Update("frozen_balance", gorm.Expr("frozen_balance - ?", withdrawal.Amount)).Error; err != nil {
+			Update("frozen_balance", gorm.Expr("frozen_balance - ?", withdrawal.Amount.String())).Error; err != nil {
 			return err
 		}
 
@@ -256,19 +284,26 @@ func (s *WithdrawService) CompleteWithdrawal(id uint, adminRemark string) error 
 
 	// 开启事务
 	err := model.GetDB().Transaction(func(tx *gorm.DB) error {
-		// 更新状态
-		if err := tx.Model(&withdrawal).Updates(map[string]interface{}{
-			"status":       model.WithdrawStatusPaid,
-			"admin_remark": adminRemark,
-			"processed_at": &now,
-		}).Error; err != nil {
-			return err
+		// 更新状态（乐观锁防止并发重复扣款）
+		completeResult := tx.Model(&withdrawal).
+			Where("status = ?", model.WithdrawStatusApproved).
+			Updates(map[string]interface{}{
+				"status":       model.WithdrawStatusPaid,
+				"admin_remark": adminRemark,
+				"processed_at": &now,
+			})
+		if completeResult.Error != nil {
+			return completeResult.Error
+		}
+		if completeResult.RowsAffected == 0 {
+			return errors.New("该提现申请已被其他管理员处理")
 		}
 
 		// 扣除余额和冻结余额
+		amountStr := withdrawal.Amount.String()
 		if err := tx.Model(&model.Merchant{}).Where("id = ?", withdrawal.MerchantID).Updates(map[string]interface{}{
-			"balance":        gorm.Expr("balance - ?", withdrawal.Amount),
-			"frozen_balance": gorm.Expr("frozen_balance - ?", withdrawal.Amount),
+			"balance":        gorm.Expr("balance - ?", amountStr),
+			"frozen_balance": gorm.Expr("frozen_balance - ?", amountStr),
 		}).Error; err != nil {
 			return err
 		}
@@ -292,8 +327,8 @@ func (s *WithdrawService) getWithdrawFeeRate() float64 {
 	if err := model.GetDB().Where("`key` = ?", "withdraw_fee_rate").First(&config).Error; err != nil {
 		return 0 // 默认无手续费
 	}
-	var rate float64
-	if err := model.GetDB().Raw("SELECT CAST(? AS DECIMAL(5,4))", config.Value).Scan(&rate).Error; err != nil {
+	rate, err := strconv.ParseFloat(config.Value, 64)
+	if err != nil {
 		return 0
 	}
 	return rate
@@ -307,31 +342,27 @@ func (s *WithdrawService) getWithdrawFeeRate() float64 {
 // 个人收款码：商户收到币（如 112.41 USDT）→ 增加结算金额（110.16 USD）→ 扣除手续费（1.10 USD）→ 最终余额 +109.06 USD
 // 系统收款码：平台收到币（如 112.41 USDT）→ 增加结算金额（110.16 USD）→ 扣除手续费（1.10 USD）→ 最终余额 +109.06 USD
 func (s *WithdrawService) AddMerchantBalance(merchantID uint, amount float64, fee float64, feeType model.FeeType) error {
+	return s.AddMerchantBalanceDec(merchantID, decimal.NewFromFloat(amount), decimal.NewFromFloat(fee), feeType)
+}
+
+// AddMerchantBalanceDec 增加商户余额（使用 decimal 避免精度丢失）
+func (s *WithdrawService) AddMerchantBalanceDec(merchantID uint, amountDec decimal.Decimal, feeDec decimal.Decimal, feeType model.FeeType) error {
 	var merchant model.Merchant
 	if err := model.GetDB().First(&merchant, merchantID).Error; err != nil {
 		return err
 	}
 
-	realAmount := amount - fee // 实际增加的余额
+	realAmount := amountDec.Sub(feeDec) // 实际增加的余额
 	var err error
 
 	if feeType == model.FeeTypeBalance {
-		// 个人收款码模式：
-		// 1. 商户钱包实际收到加密货币（如 112.41 USDT）
-		// 2. 系统增加结算金额到余额（amount = 110.16 USD）
-		// 3. 扣除预扣的手续费冻结额
-		// 4. 从余额扣除手续费（fee = 1.10 USD）
 		err = model.GetDB().Model(&model.Merchant{}).Where("id = ?", merchantID).Updates(map[string]interface{}{
-			"balance":        gorm.Expr("balance + ?", realAmount),
-			"frozen_balance": gorm.Expr("frozen_balance - ?", fee),
+			"balance":        gorm.Expr("balance + ?", realAmount.String()),
+			"frozen_balance": gorm.Expr("frozen_balance - ?", feeDec.String()),
 		}).Error
 	} else {
-		// 系统收款码模式：
-		// 1. 平台钱包收到加密货币（如 112.41 USDT）
-		// 2. 系统增加结算金额到余额（amount = 110.16 USD）
-		// 3. 扣除手续费后的金额入账
 		err = model.GetDB().Model(&model.Merchant{}).Where("id = ?", merchantID).
-			Update("balance", gorm.Expr("balance + ?", realAmount)).Error
+			Update("balance", gorm.Expr("balance + ?", realAmount.String())).Error
 	}
 
 	if err == nil {
@@ -341,9 +372,9 @@ func (s *WithdrawService) AddMerchantBalance(merchantID uint, amount float64, fe
 		go GetTelegramService().NotifyBalanceChanged(
 			merchantID,
 			"订单入账",
-			decimal.NewFromFloat(realAmount),
-			decimal.NewFromFloat(merchant.Balance),
-			fmt.Sprintf("订单结算 USD %.2f，扣除手续费 USD %.2f", amount, fee),
+			realAmount,
+			merchant.Balance,
+			fmt.Sprintf("订单结算 USD %s，扣除手续费 USD %s", amountDec.StringFixed(2), feeDec.StringFixed(2)),
 		)
 	}
 
@@ -352,9 +383,27 @@ func (s *WithdrawService) AddMerchantBalance(merchantID uint, amount float64, fe
 
 // RefundPreChargedFee 退还预扣的手续费 (订单失败/取消时)
 func (s *WithdrawService) RefundPreChargedFee(merchantID uint, fee float64) error {
-	if fee <= 0 {
+	return s.RefundPreChargedFeeDec(merchantID, decimal.NewFromFloat(fee))
+}
+
+// RefundPreChargedFeeDec 退还预扣的手续费（使用 decimal 避免精度丢失）
+func (s *WithdrawService) RefundPreChargedFeeDec(merchantID uint, feeDec decimal.Decimal) error {
+	if feeDec.LessThanOrEqual(decimal.Zero) {
 		return nil
 	}
 	return model.GetDB().Model(&model.Merchant{}).Where("id = ?", merchantID).
-		Update("frozen_balance", gorm.Expr("frozen_balance - ?", fee)).Error
+		Update("frozen_balance", gorm.Expr("frozen_balance - ?", feeDec.String())).Error
+}
+
+// getWithdrawFee 获取提现手续费（从配置读取，默认 1 USD）
+func (s *WithdrawService) getWithdrawFee() decimal.Decimal {
+	var cfg model.SystemConfig
+	if err := model.GetDB().Where("`key` = ?", "withdraw_fee").First(&cfg).Error; err != nil {
+		return decimal.NewFromInt(1) // 默认 1 USD
+	}
+	fee, err := decimal.NewFromString(cfg.Value)
+	if err != nil {
+		return decimal.NewFromInt(1)
+	}
+	return fee
 }

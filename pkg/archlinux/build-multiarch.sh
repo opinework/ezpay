@@ -34,6 +34,22 @@ ARCHS=("x86_64" "aarch64")
 BUILD_SUCCESS=()
 BUILD_FAILED=()
 
+# Clean all caches before build
+clean_all() {
+    echo -e "${YELLOW}>>> Cleaning previous Arch packages...${NC}"
+
+    # Clean old Arch packages and temp binaries
+    rm -f "$PROJECT_DIR/release/"*.pkg.tar.zst 2>/dev/null || true
+    rm -f "$PROJECT_DIR/ezpay-"* 2>/dev/null || true
+    echo -e "  - Previous Arch packages cleaned"
+
+    echo -e "${GREEN}✓ Clean complete${NC}"
+    echo ""
+}
+
+# Clean all caches first
+clean_all
+
 # Build for each architecture
 for ARCH in "${ARCHS[@]}"; do
     echo -e "${GREEN}=== Building for $ARCH ===${NC}"
@@ -79,6 +95,7 @@ for ARCH in "${ARCHS[@]}"; do
     echo -e "${YELLOW}Compiling binary for $ARCH ($GOARCH)...${NC}"
 
     if go build \
+        -a \
         -buildvcs=false \
         -trimpath \
         -ldflags="-s -w -X main.Version=${PKGVER} -X 'main.BuildDate=$BUILDDATE'" \
@@ -88,7 +105,7 @@ for ARCH in "${ARCHS[@]}"; do
         echo -e "${GREEN}✓ Binary compiled successfully${NC}"
 
         # Create a package using fpm (if available) or manual packaging
-        RELEASE_DIR="$PROJECT_DIR/release"
+        RELEASE_DIR="$PROJECT_DIR/release/archlinux"
         mkdir -p "$RELEASE_DIR"
 
         # Create package directory structure
@@ -113,6 +130,21 @@ for ARCH in "${ARCHS[@]}"; do
         # Install systemd service
         install -Dm644 "$SCRIPT_DIR/ezpay.service" "$PKG_DIR/usr/lib/systemd/system/ezpay.service"
 
+        # Create sysusers.d config
+        install -dm755 "$PKG_DIR/usr/lib/sysusers.d"
+        echo 'u ezpay - "EzPay Payment Gateway" /var/lib/ezpay' > "$PKG_DIR/usr/lib/sysusers.d/ezpay.conf"
+        chmod 644 "$PKG_DIR/usr/lib/sysusers.d/ezpay.conf"
+
+        # Create tmpfiles.d config
+        install -dm755 "$PKG_DIR/usr/lib/tmpfiles.d"
+        cat > "$PKG_DIR/usr/lib/tmpfiles.d/ezpay.conf" <<'EOF'
+d /var/lib/ezpay 0750 ezpay ezpay -
+d /var/lib/ezpay/uploads 0750 ezpay ezpay -
+d /var/lib/ezpay/qrcode 0750 ezpay ezpay -
+d /var/log/ezpay 0750 ezpay ezpay -
+EOF
+        chmod 644 "$PKG_DIR/usr/lib/tmpfiles.d/ezpay.conf"
+
         # Create directories
         install -dm750 "$PKG_DIR/var/lib/ezpay"
         install -dm750 "$PKG_DIR/var/lib/ezpay/uploads"
@@ -129,12 +161,12 @@ pkgname = ezpay
 pkgbase = ezpay
 pkgver = ${PKGVER}-1
 pkgdesc = EzPay - A lightweight payment gateway supporting USDT, WeChat and Alipay
-url = https://github.com/yourusername/ezpay
+url = https://opine.work
 builddate = $(date +%s)
-packager = Unknown Packager
+packager = Opine Studio <dev@opine.work>
 size = $(du -sb "$PKG_DIR" | awk '{print $1}')
 arch = $ARCH
-license = MIT
+license = proprietary
 depend = glibc
 backup = etc/ezpay/config.yaml
 EOF

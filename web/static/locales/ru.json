@@ -87,7 +87,7 @@
     "topMerchantsByOrders": "Топ 5 мерчантов по заказам",
     "rank": "Место",
     "merchant": "Мерчант",
-    "amount": "Сумма (CNY)",
+    "amount": "Сумма заказа",
     "orderCount": "Заказы"
   },
   "merchant": {
@@ -127,7 +127,7 @@
     "outTradeNo": "№ заказа мерчанта",
     "merchantName": "Мерчант",
     "productName": "Товар",
-    "amount": "Сумма (CNY)",
+    "amount": "Сумма заказа",
     "usdtAmount": "Сумма (USDT)",
     "chain": "Канал оплаты",
     "status": "Статус",

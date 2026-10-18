@@ -25,6 +25,7 @@ type RateLimiter struct {
 	rate        float64       // 每秒生成的令牌数
 	capacity    int           // 桶容量
 	cleanupTick time.Duration // 清理间隔
+	stopChan    chan struct{} // 停止清理 goroutine
 }
 
 // tokenBucket 令牌桶
@@ -41,6 +42,7 @@ func NewRateLimiter(rate float64, capacity int) *RateLimiter {
 		rate:        rate,
 		capacity:    capacity,
 		cleanupTick: 5 * time.Minute,
+		stopChan:    make(chan struct{}),
 	}
 	// 启动定期清理过期桶
 	go rl.cleanup()
@@ -84,16 +86,21 @@ func (rl *RateLimiter) cleanup() {
 	ticker := time.NewTicker(rl.cleanupTick)
 	defer ticker.Stop()
 
-	for range ticker.C {
-		rl.mu.Lock()
-		now := time.Now()
-		for key, bucket := range rl.buckets {
-			// 清理10分钟未使用的桶
-			if now.Sub(bucket.lastUpdate) > 10*time.Minute {
-				delete(rl.buckets, key)
+	for {
+		select {
+		case <-ticker.C:
+			rl.mu.Lock()
+			now := time.Now()
+			for key, bucket := range rl.buckets {
+				// 清理10分钟未使用的桶
+				if now.Sub(bucket.lastUpdate) > 10*time.Minute {
+					delete(rl.buckets, key)
+				}
 			}
+			rl.mu.Unlock()
+		case <-rl.stopChan:
+			return
 		}
-		rl.mu.Unlock()
 	}
 }
 
@@ -111,6 +118,13 @@ func init() {
 
 // InitRateLimiters 根据配置初始化限流器
 func InitRateLimiters(apiRate float64, apiBurst int, loginRate float64, loginBurst int) {
+	// 停止旧的限流器清理 goroutine
+	if apiRateLimiter != nil {
+		close(apiRateLimiter.stopChan)
+	}
+	if loginRateLimiter != nil {
+		close(loginRateLimiter.stopChan)
+	}
 	apiRateLimiter = NewRateLimiter(apiRate, apiBurst)
 	loginRateLimiter = NewRateLimiter(loginRate, loginBurst)
 }
@@ -231,13 +245,48 @@ func AdminAuth(cfg *config.Config) gin.HandlerFunc {
 		}
 
 		// 提取Claims
-		if claims, ok := token.Claims.(jwt.MapClaims); ok {
-			adminID := uint(claims["admin_id"].(float64))
-			username := claims["username"].(string)
-
-			c.Set("admin_id", adminID)
-			c.Set("username", username)
+		claims, ok := token.Claims.(jwt.MapClaims)
+		if !ok {
+			c.JSON(http.StatusUnauthorized, gin.H{
+				"code": -1,
+				"msg":  "Token解析失败",
+			})
+			c.Abort()
+			return
 		}
+
+		// 验证 token 类型
+		tokenType, _ := claims["type"].(string)
+		if tokenType != "admin" {
+			c.JSON(http.StatusUnauthorized, gin.H{
+				"code": -1,
+				"msg":  "无效的管理员Token",
+			})
+			c.Abort()
+			return
+		}
+
+		adminIDVal, ok := claims["admin_id"].(float64)
+		if !ok || adminIDVal <= 0 || adminIDVal > 1<<53 {
+			c.JSON(http.StatusUnauthorized, gin.H{
+				"code": -1,
+				"msg":  "Token信息不完整",
+			})
+			c.Abort()
+			return
+		}
+		username, ok := claims["username"].(string)
+		if !ok {
+			c.JSON(http.StatusUnauthorized, gin.H{
+				"code": -1,
+				"msg":  "Token信息不完整",
+			})
+			c.Abort()
+			return
+		}
+
+		c.Set("admin_id", uint(adminIDVal))
+		c.Set("username", username)
 
 		c.Next()
 	}
@@ -276,7 +325,13 @@ func CORSWithConfig(allowedOrigins []string) gin.HandlerFunc {
 			}
 		} else {
 			// 未配置白名单时允许所有来源（开发模式）
-			c.Header("Access-Control-Allow-Origin", "*")
+			if origin != "" {
+				// 有 Origin 时反射具体来源，支持 credentials
+				c.Header("Access-Control-Allow-Origin", origin)
+				c.Header("Vary", "Origin")
+			} else {
+				c.Header("Access-Control-Allow-Origin", "*")
+			}
 		}
 
 		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
@@ -354,8 +409,25 @@ func MerchantAuth(cfg *config.Config) gin.HandlerFunc {
 			return
 		}
 
-		merchantID := uint(claims["merchant_id"].(float64))
-		pid := claims["pid"].(string)
+		merchantIDVal, ok := claims["merchant_id"].(float64)
+		if !ok || merchantIDVal <= 0 || merchantIDVal > 1<<53 {
+			c.JSON(http.StatusUnauthorized, gin.H{
+				"code": -1,
+				"msg":  "Token信息不完整",
+			})
+			c.Abort()
+			return
+		}
+		merchantID := uint(merchantIDVal)
+		pid, ok := claims["pid"].(string)
+		if !ok {
+			c.JSON(http.StatusUnauthorized, gin.H{
+				"code": -1,
+				"msg":  "Token信息不完整",
+			})
+			c.Abort()
+			return
+		}
 
 		// 验证商户状态
 		var merchant model.Merchant

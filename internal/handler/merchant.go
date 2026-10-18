@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
+	"gorm.io/gorm"
 )
 
 // MerchantHandler 商户处理器
@@ -111,6 +113,10 @@ func (h *MerchantHandler) Login(c *gin.Context) {
 func (h *MerchantHandler) GetProfile(c *gin.Context) {
 	merchant := c.MustGet("merchant").(*model.Merchant)
 
+	defaultCurrency := merchant.DefaultCurrency
+	if defaultCurrency == "" {
+		defaultCurrency = "USD"
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"code": 1,
 		"data": gin.H{
@@ -124,6 +130,7 @@ func (h *MerchantHandler) GetProfile(c *gin.Context) {
 			"status":           merchant.Status,
 			"telegram_chat_id": merchant.TelegramChatID,
 			"telegram_notify":  merchant.TelegramNotify,
+			"default_currency": defaultCurrency,
 			"created_at":       merchant.CreatedAt,
 		},
 	})
@@ -134,10 +141,11 @@ func (h *MerchantHandler) UpdateProfile(c *gin.Context) {
 	merchant := c.MustGet("merchant").(*model.Merchant)
 
 	var req struct {
-		Name      string `json:"name"`
-		Email     string `json:"email"`
-		NotifyURL string `json:"notify_url"`
-		ReturnURL string `json:"return_url"`
+		Name            string `json:"name"`
+		Email           string `json:"email"`
+		NotifyURL       string `json:"notify_url"`
+		ReturnURL       string `json:"return_url"`
+		DefaultCurrency string `json:"default_currency"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -158,9 +166,20 @@ func (h *MerchantHandler) UpdateProfile(c *gin.Context) {
 	if req.ReturnURL != "" {
 		updates["return_url"] = req.ReturnURL
 	}
+	if req.DefaultCurrency != "" {
+		normalized := service.NormalizeCurrency(req.DefaultCurrency)
+		if !isSupportedDefaultCurrency(normalized) {
+			c.JSON(http.StatusOK, gin.H{"code": -1, "msg": "不支持的默认货币"})
+			return
+		}
+		updates["default_currency"] = normalized
+	}
 
 	if len(updates) > 0 {
-		model.DB.Model(merchant).Updates(updates)
+		if err := model.DB.Model(merchant).Updates(updates).Error; err != nil {
+			c.JSON(http.StatusOK, gin.H{"code": -1, "msg": "更新失败"})
+			return
+		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{"code": 1, "msg": "更新成功"})
@@ -187,8 +206,15 @@ func (h *MerchantHandler) ChangePassword(c *gin.Context) {
 	}
 
 	// 更新密码
-	hashedPassword, _ := util.HashPassword(req.NewPassword)
-	model.DB.Model(merchant).Update("password", hashedPassword)
+	hashedPassword, err := util.HashPassword(req.NewPassword)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"code": -1, "msg": "密码加密失败"})
+		return
+	}
+	if err := model.DB.Model(merchant).Update("password", hashedPassword).Error; err != nil {
+		c.JSON(http.StatusOK, gin.H{"code": -1, "msg": "密码更新失败"})
+		return
+	}
 
 	c.JSON(http.StatusOK, gin.H{"code": 1, "msg": "密码修改成功"})
 }
@@ -302,26 +328,26 @@ func (h *MerchantHandler) DashboardTrend(c *gin.Context) {
 		// 当日按小时统计
 		startDate = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 		dateFormat = "%H:00"
-		groupBy = "HOUR(created_at)"
+		groupBy = model.DateGroupBy("created_at", "hour")
 	case "week":
 		// 最近7天按天统计
 		startDate = now.AddDate(0, 0, -6)
 		dateFormat = "%m-%d"
-		groupBy = "DATE(created_at)"
+		groupBy = model.DateGroupBy("created_at", "date")
 	case "month":
 		// 最近30天按天统计
 		startDate = now.AddDate(0, 0, -29)
 		dateFormat = "%m-%d"
-		groupBy = "DATE(created_at)"
+		groupBy = model.DateGroupBy("created_at", "date")
 	case "3months":
 		// 最近3个月按周统计
 		startDate = now.AddDate(0, -3, 0)
 		dateFormat = "%Y-%m-%d"
-		groupBy = "YEARWEEK(created_at, 1)"
+		groupBy = model.DateGroupBy("created_at", "yearweek")
 	default:
 		startDate = now.AddDate(0, 0, -6)
 		dateFormat = "%m-%d"
-		groupBy = "DATE(created_at)"
+		groupBy = model.DateGroupBy("created_at", "date")
 	}
 
 	var trends []struct {
@@ -334,12 +360,11 @@ func (h *MerchantHandler) DashboardTrend(c *gin.Context) {
 		Where("merchant_id = ? AND status = 1 AND created_at >= ?", merchantID, startDate)
 
 	// 使用 settlement_amount 作为 USD 金额
-	if period == "today" {
-		query.Select("DATE_FORMAT(created_at, ?) as label, COUNT(*) as count, COALESCE(SUM(settlement_amount), 0) as amount_usd", dateFormat)
-	} else if period == "3months" {
-		query.Select("MIN(DATE_FORMAT(created_at, ?)) as label, COUNT(*) as count, COALESCE(SUM(settlement_amount), 0) as amount_usd", dateFormat)
+	dateFmtExpr := model.DateFormatParam("created_at")
+	if period == "3months" {
+		query.Select(fmt.Sprintf("MIN(%s) as label, COUNT(*) as count, COALESCE(SUM(settlement_amount), 0) as amount_usd", dateFmtExpr), dateFormat)
 	} else {
-		query.Select("DATE_FORMAT(created_at, ?) as label, COUNT(*) as count, COALESCE(SUM(settlement_amount), 0) as amount_usd", dateFormat)
+		query.Select(fmt.Sprintf("%s as label, COUNT(*) as count, COALESCE(SUM(settlement_amount), 0) as amount_usd", dateFmtExpr), dateFormat)
 	}
 
 	query.Group(groupBy).Order("label ASC").Scan(&trends)
@@ -372,6 +397,12 @@ func (h *MerchantHandler) ListOrders(c *gin.Context) {
 
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 100 {
+		pageSize = 20
+	}
 	status := c.Query("status")
 	tradeNo := c.Query("trade_no")
 	outTradeNo := c.Query("out_trade_no")
@@ -384,10 +415,10 @@ func (h *MerchantHandler) ListOrders(c *gin.Context) {
 		query = query.Where("status = ?", status)
 	}
 	if tradeNo != "" {
-		query = query.Where("trade_no LIKE ?", "%"+tradeNo+"%")
+		query = query.Where("trade_no LIKE ?", "%"+escapeLike(tradeNo)+"%")
 	}
 	if outTradeNo != "" {
-		query = query.Where("out_trade_no LIKE ?", "%"+outTradeNo+"%")
+		query = query.Where("out_trade_no LIKE ?", "%"+escapeLike(outTradeNo)+"%")
 	}
 	if startDate != "" {
 		query = query.Where("created_at >= ?", startDate+" 00:00:00")
@@ -434,6 +465,11 @@ func (h *MerchantHandler) GetOrder(c *gin.Context) {
 }
 
 // ConfirmPayment 商户手动确认收款
+//
+// 安全限制：
+//   - 仅 fiat 链路 (wechat/alipay)；加密货币以链上扫描为准，不允许手动确认
+//   - **仅个人钱包订单** 可自助确认（钱本来进商户自己账户，确认到账合理）
+//   - 系统钱包订单必须管理员走 MarkOrderPaid，否则商户能凭空给自己上账后跑路
 func (h *MerchantHandler) ConfirmPayment(c *gin.Context) {
 	merchantID := c.MustGet("merchant_id").(uint)
 	tradeNo := c.Param("trade_no")
@@ -456,7 +492,24 @@ func (h *MerchantHandler) ConfirmPayment(c *gin.Context) {
 		return
 	}
 
-	// 标记订单已支付
+	// 钱包归属检查：仅个人钱包订单允许自助确认；系统钱包订单需管理员介入
+	if order.WalletID == 0 {
+		c.JSON(http.StatusOK, gin.H{"code": -1, "msg": "订单未绑定钱包，无法自助确认，请联系管理员"})
+		return
+	}
+	var orderWallet model.Wallet
+	if err := model.DB.First(&orderWallet, order.WalletID).Error; err != nil {
+		c.JSON(http.StatusOK, gin.H{"code": -1, "msg": "订单钱包记录不存在，请联系管理员"})
+		return
+	}
+	if orderWallet.MerchantID == 0 || orderWallet.MerchantID != merchantID {
+		// orderWallet.MerchantID == 0 → 系统钱包；钱本应进平台总账，商户不能自助确认
+		// orderWallet.MerchantID != merchantID → 跨商户钱包（异常情况）
+		c.JSON(http.StatusOK, gin.H{"code": -1, "msg": "该订单使用系统钱包收款，需管理员手动确认"})
+		return
+	}
+
+	// 原子更新：WHERE 条件包含状态检查，防止并发重复确认
 	now := time.Now()
 	updates := map[string]interface{}{
 		"status":        model.OrderStatusPaid,
@@ -465,8 +518,32 @@ func (h *MerchantHandler) ConfirmPayment(c *gin.Context) {
 		"paid_at":       &now,
 	}
 
-	if err := model.DB.Model(&order).Updates(updates).Error; err != nil {
-		c.JSON(http.StatusOK, gin.H{"code": -1, "msg": "确认失败: " + err.Error()})
+	// 在事务中完成：更新订单状态 + 入账商户余额（保证原子性）
+	txErr := model.DB.Transaction(func(tx *gorm.DB) error {
+		result := tx.Model(&model.Order{}).
+			Where("id = ? AND status IN ?", order.ID, []model.OrderStatus{model.OrderStatusPending, model.OrderStatusExpired}).
+			Updates(updates)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return fmt.Errorf("订单状态已变更")
+		}
+
+		// 增加商户余额（在同一事务内）
+		realAmount := order.SettlementAmount.Sub(order.Fee)
+		if order.FeeType == model.FeeTypeBalance {
+			return tx.Model(&model.Merchant{}).Where("id = ?", order.MerchantID).Updates(map[string]interface{}{
+				"balance":        gorm.Expr("balance + ?", realAmount.String()),
+				"frozen_balance": gorm.Expr("frozen_balance - ?", order.Fee.String()),
+			}).Error
+		}
+		return tx.Model(&model.Merchant{}).Where("id = ?", order.MerchantID).
+			Update("balance", gorm.Expr("balance + ?", realAmount.String())).Error
+	})
+
+	if txErr != nil {
+		c.JSON(http.StatusOK, gin.H{"code": -1, "msg": txErr.Error()})
 		return
 	}
 
@@ -494,7 +571,7 @@ func (h *MerchantHandler) CreateTestOrder(c *gin.Context) {
 	var req struct {
 		Type     string `json:"type" binding:"required"`
 		Money    string `json:"money" binding:"required"`
-		Currency string `json:"currency"` // 货币类型: CNY, USD, USDT, EUR (默认 CNY)
+		Currency string `json:"currency"` // 货币类型: CNY, USD, USDT, EUR (默认 USD)
 		Name     string `json:"name"`
 	}
 
@@ -568,9 +645,21 @@ func (h *MerchantHandler) CancelOrder(c *gin.Context) {
 	}
 
 	// 标记订单已过期/取消
-	if err := model.DB.Model(&order).Update("status", model.OrderStatusExpired).Error; err != nil {
-		c.JSON(http.StatusOK, gin.H{"code": -1, "msg": "取消失败: " + err.Error()})
+	result := model.DB.Model(&model.Order{}).Where("id = ? AND status = ?", order.ID, model.OrderStatusPending).Update("status", model.OrderStatusExpired)
+	if result.Error != nil {
+		c.JSON(http.StatusOK, gin.H{"code": -1, "msg": "取消失败: " + result.Error.Error()})
 		return
+	}
+	if result.RowsAffected == 0 {
+		c.JSON(http.StatusOK, gin.H{"code": -1, "msg": "订单状态已变更，无法取消"})
+		return
+	}
+
+	// 退还预扣的手续费（仅商户钱包模式）
+	if order.FeeType == model.FeeTypeBalance {
+		if err := service.GetWithdrawService().RefundPreChargedFeeDec(order.MerchantID, order.Fee); err != nil {
+			log.Printf("Failed to refund fee for cancelled order %s: %v", tradeNo, err)
+		}
 	}
 
 	log.Printf("Merchant %d cancelled order %s", merchantID, tradeNo)
@@ -790,37 +879,37 @@ func (h *MerchantHandler) UploadQRCode(c *gin.Context) {
 	}
 
 	// 生成文件名
-	ext := ".png"
-	if len(file.Filename) > 4 {
-		ext = file.Filename[len(file.Filename)-4:]
+	ext := filepath.Ext(file.Filename)
+	if ext == "" {
+		ext = ".png"
 	}
 	filename := util.GenerateRandomHex(16) + ext
 	// 确保上传目录存在（使用配置的数据目录）
 	dataDir := config.Get().Storage.DataDir
 	qrcodeDir := dataDir + "/qrcode"
 	os.MkdirAll(qrcodeDir, 0755)
-	filepath := qrcodeDir + "/" + filename
+	filePath := qrcodeDir + "/" + filename
 
 	// 保存文件
-	log.Printf("Upload path: %s", filepath)
-	if err := c.SaveUploadedFile(file, filepath); err != nil {
+	log.Printf("Upload path: %s", filePath)
+	if err := c.SaveUploadedFile(file, filePath); err != nil {
 		log.Printf("Save file error: %v", err)
 		c.JSON(http.StatusOK, gin.H{"code": -1, "msg": "保存文件失败: " + err.Error()})
 		return
 	}
 
 	// 解析二维码内容
-	qrContent, err := util.DecodeQRCodeFromFile(filepath)
+	qrContent, err := util.DecodeQRCodeFromFile(filePath)
 	if err != nil {
 		// 删除已上传的文件
-		os.Remove(filepath)
+		os.Remove(filePath)
 		c.JSON(http.StatusOK, gin.H{"code": -1, "msg": "无法识别二维码: " + err.Error()})
 		return
 	}
 
 	// 验证是否是有效的支付二维码
 	if !util.IsValidFiatQRCode(qrContent) {
-		os.Remove(filepath)
+		os.Remove(filePath)
 		c.JSON(http.StatusOK, gin.H{"code": -1, "msg": "不是有效的微信/支付宝收款码"})
 		return
 	}
@@ -849,8 +938,8 @@ func (h *MerchantHandler) GetChainStatus(c *gin.Context) {
 		{"chain": "arbitrum", "name": "Arbitrum", "enabled": chainStatus["arbitrum"]},
 		{"chain": "avalanche", "name": "Avalanche", "enabled": chainStatus["avalanche"]},
 		{"chain": "base", "name": "Base", "enabled": chainStatus["base"]},
-		{"chain": "wechat", "name": "微信支付", "enabled": true},
-		{"chain": "alipay", "name": "支付宝", "enabled": true},
+		{"chain": "wechat", "name": "微信支付", "enabled": chainStatus["wechat"]},
+		{"chain": "alipay", "name": "支付宝", "enabled": chainStatus["alipay"]},
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -876,7 +965,7 @@ func (h *MerchantHandler) GetBalance(c *gin.Context) {
 		"data": gin.H{
 			"balance":        merchant.Balance,
 			"frozen_balance": merchant.FrozenBalance,
-			"available":      merchant.Balance - merchant.FrozenBalance,
+			"available":      merchant.Balance.Sub(merchant.FrozenBalance),
 		},
 	})
 }
@@ -958,6 +1047,12 @@ func (h *MerchantHandler) ListWithdrawals(c *gin.Context) {
 	merchantID := c.GetUint("merchant_id")
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 100 {
+		pageSize = 20
+	}
 	statusStr := c.Query("status")
 
 	var status *model.WithdrawStatus
@@ -1040,8 +1135,8 @@ func (h *MerchantHandler) GetWalletMode(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"code": 1,
 		"data": gin.H{
-			"wallet_mode":            merchant.WalletMode,
-			"wallet_mode_name":       modeNames[merchant.WalletMode],
+			"wallet_mode":              merchant.WalletMode,
+			"wallet_mode_name":         modeNames[merchant.WalletMode],
 			"system_wallet_fee_rate":   systemFeeRate,
 			"personal_wallet_fee_rate": personalFeeRate,
 		},
@@ -1234,8 +1329,8 @@ func (h *MerchantHandler) UpdateNotifySettings(c *gin.Context) {
 
 	// 更新商户通知设置
 	updates := map[string]interface{}{
-		"telegram_notify":  req.TelegramNotify,
-		"notify_settings":  req.NotifySettings,
+		"telegram_notify": req.TelegramNotify,
+		"notify_settings": req.NotifySettings,
 	}
 
 	if err := model.GetDB().Model(merchant).Updates(updates).Error; err != nil {
@@ -1316,4 +1411,3 @@ func (h *MerchantHandler) GetMonitorConfig(c *gin.Context) {
 		},
 	})
 }
-

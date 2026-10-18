@@ -506,6 +506,16 @@
                                     <label class="block text-gray-700 text-sm font-bold mb-2" data-i18n="merchantPage.settings.syncReturnUrl">同步跳转URL</label>
                                     <input v-model="profile.return_url" class="w-full px-3 py-2 border rounded-lg" placeholder="https://example.com/return">
                                 </div>
+                                <div>
+                                    <label class="block text-gray-700 text-sm font-bold mb-2" data-i18n="merchantPage.settings.defaultCurrency">默认货币</label>
+                                    <select v-model="profile.default_currency" class="w-full px-3 py-2 border rounded-lg">
+                                        <option value="USD">USD - 美元</option>
+                                        <option value="CNY">CNY - 人民币</option>
+                                        <option value="USDT">USDT - 泰达币</option>
+                                        <option value="EUR">EUR - 欧元</option>
+                                    </select>
+                                    <p class="text-xs text-gray-500 mt-1" data-i18n="merchantPage.settings.defaultCurrencyDesc">当下单未指定 currency 时使用此货币</p>
+                                </div>
                                 <button @click="updateProfile" class="bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600" data-i18n="merchantPage.settings.saveChanges">
                                     保存修改
                                 </button>
@@ -1029,7 +1039,7 @@
             const chains = ref([]);
             const apiKey = ref({ pid: '', key: '' });
             const showKey = ref(false);
-            const profile = reactive({ name: '', email: '', notify_url: '', return_url: '', telegram_chat_id: 0 });
+            const profile = reactive({ name: '', email: '', notify_url: '', return_url: '', telegram_chat_id: 0, default_currency: 'USD' });
             const passwordForm = reactive({ old_password: '', new_password: '' });
             const showWalletModal = ref(false);
             const editWallet = ref({});

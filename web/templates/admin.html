@@ -257,7 +257,7 @@
                                     <th data-i18n="order.merchantName">商户</th>
                                     <th data-i18n="adminPage.orders.tableHeader.paymentMethod">支付方式</th>
                                     <th data-i18n="order.outTradeNo">商户订单号</th>
-                                    <th data-i18n="order.amount">金额(CNY)</th>
+                                    <th data-i18n="order.amount">订单金额</th>
                                     <th data-i18n="adminPage.orders.tableHeader.received">实收</th>
                                     <th data-i18n="common.status">状态</th>
                                     <th data-i18n="order.createTime">创建时间</th>
@@ -977,6 +977,19 @@
             }
         }
 
+        function formatOrderAmount(order) {
+            return `${order.money || '-'} ${order.currency || 'USD'}`;
+        }
+
+        function formatPaymentAmount(order) {
+            const amount = order.unique_amount || order.pay_amount || order.usdt_amount || '-';
+            const type = order.type || order.chain;
+            let currency = order.pay_currency || 'USDT';
+            if (!order.pay_currency && (type === 'wechat' || type === 'alipay')) currency = 'CNY';
+            if (!order.pay_currency && type === 'trx') currency = 'TRX';
+            return `${amount} ${currency}`;
+        }
+
         async function loadOrders() {
             const merchantId = document.getElementById('orderMerchantFilter').value;
             const status = document.getElementById('orderStatusFilter').value;
@@ -993,16 +1006,15 @@
                 const tbody = document.getElementById('ordersTable');
                 tbody.innerHTML = (data.data || []).map(order => {
                     const payType = order.type || order.chain || '-';
-                    const isPassive = payType === 'wechat' || payType === 'alipay';
-                    const isTRX = payType === 'trx';
-                    const receivedAmount = isPassive ? `¥${order.money}` : (isTRX ? `${order.usdt_amount || '-'} TRX` : `${order.usdt_amount || '-'} USDT`);
+                    const orderAmount = formatOrderAmount(order);
+                    const receivedAmount = formatPaymentAmount(order);
                     return `
                     <tr>
                         <td>${order.trade_no}</td>
                         <td><span class="badge" style="background:#607d8b;color:white;">${order.merchant_pid || '-'}</span></td>
                         <td>${getPaymentTypeBadge(payType)}</td>
                         <td>${order.out_trade_no}</td>
-                        <td>¥${order.money}</td>
+                        <td>${orderAmount}</td>
                         <td>${receivedAmount}</td>
                         <td>${getStatusBadge(order.status)}</td>
                         <td>${order.created_at}</td>
@@ -1128,9 +1140,9 @@
                 <div class="form-group">
                     <label>币种</label>
                     <select id="testCurrency" style="width:100%;padding:12px;border:1px solid #ddd;border-radius:8px;">
-                        <option value="USD">USD (美元)</option>
+                        <option value="USD" selected>USD (美元)</option>
                         <option value="EUR">EUR (欧元)</option>
-                        <option value="CNY" selected>CNY (人民币)</option>
+                        <option value="CNY">CNY (人民币)</option>
                     </select>
                 </div>
                 <div class="form-group">
@@ -1184,6 +1196,95 @@
             }
         }
 
+        // 收银台 - 从商户管理页面发起收款
+        function showCashier(merchantId, pid, name) {
+            document.getElementById('modalTitle').textContent = '收银台 - ' + name + ' (' + pid + ')';
+            document.getElementById('modalBody').innerHTML = `
+                <div style="background:linear-gradient(135deg,#f0fdf4,#ecfdf5);padding:16px;border-radius:10px;margin-bottom:20px;border:1px solid #bbf7d0;">
+                    <div style="display:flex;align-items:center;gap:8px;">
+                        <i class="fas fa-cash-register" style="font-size:20px;color:#059669;"></i>
+                        <div>
+                            <div style="font-size:13px;color:#166534;">商户: ${name}</div>
+                            <div style="font-size:12px;color:#6b7280;">PID: ${pid}</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>支付方式</label>
+                    <select id="cashierPayType" style="width:100%;padding:12px;border:1px solid #ddd;border-radius:8px;">
+                        <optgroup label="加密货币 - USDT">
+                            <option value="usdt_trc20">USDT - TRC20 (Tron)</option>
+                            <option value="usdt_erc20">USDT - ERC20 (Ethereum)</option>
+                            <option value="usdt_bep20">USDT - BEP20 (BSC)</option>
+                            <option value="usdt_polygon">USDT - Polygon</option>
+                            <option value="usdt_optimism">USDT - Optimism</option>
+                            <option value="usdt_arbitrum">USDT - Arbitrum</option>
+                            <option value="usdt_avalanche">USDT - Avalanche</option>
+                            <option value="usdt_base">USDT - Base</option>
+                        </optgroup>
+                        <optgroup label="加密货币 - 其他">
+                            <option value="trx">TRX (Tron)</option>
+                        </optgroup>
+                        <optgroup label="法币收款">
+                            <option value="wechat">微信支付</option>
+                            <option value="alipay">支付宝</option>
+                        </optgroup>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>金额</label>
+                    <input type="number" id="cashierMoney" value="10" step="0.01" min="0.01" style="width:100%;padding:12px;border:1px solid #ddd;border-radius:8px;" placeholder="输入收款金额">
+                </div>
+                <div class="form-group">
+                    <label>币种</label>
+                    <select id="cashierCurrency" style="width:100%;padding:12px;border:1px solid #ddd;border-radius:8px;">
+                        <option value="USD" selected>USD (美元)</option>
+                        <option value="EUR">EUR (欧元)</option>
+                        <option value="CNY">CNY (人民币)</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>商品名称 (可选)</label>
+                    <input type="text" id="cashierName" placeholder="收款订单" style="width:100%;padding:12px;border:1px solid #ddd;border-radius:8px;">
+                </div>
+                <div style="display:flex;gap:10px;margin-top:20px;">
+                    <button class="btn btn-primary" style="flex:1;padding:14px;font-size:15px;" onclick="createCashierOrder(${merchantId})"><i class="fas fa-cash-register"></i> 创建收款并打开收银台</button>
+                    <button class="btn" onclick="closeModal()">取消</button>
+                </div>
+            `;
+            document.getElementById('modal').classList.add('show');
+        }
+
+        async function createCashierOrder(merchantId) {
+            const payType = document.getElementById('cashierPayType').value;
+            const money = document.getElementById('cashierMoney').value;
+            const currency = document.getElementById('cashierCurrency').value;
+            const name = document.getElementById('cashierName').value;
+
+            if (!money || parseFloat(money) <= 0) {
+                alert('请输入有效金额');
+                return;
+            }
+
+            const data = await api('/admin/api/orders/test', {
+                method: 'POST',
+                body: JSON.stringify({
+                    merchant_id: merchantId,
+                    type: payType,
+                    money: money,
+                    currency: currency,
+                    name: name || '收款订单'
+                })
+            });
+
+            if (data.code === 1) {
+                closeModal();
+                window.open(data.pay_url, '_blank');
+            } else {
+                alert(data.msg || '创建失败');
+            }
+        }
+
         // 清理无效订单（超过24小时未支付的订单）
         async function cleanInvalidOrders() {
             if (!confirm('确定要清理所有超过24小时未支付的订单吗？此操作不可恢复！')) {
@@ -1209,13 +1310,14 @@
                         <td>${m.pid}</td>
                         <td>${m.name}</td>
                         <td>
-                            <span style="font-weight:600;color:#059669;">${(m.balance || 0).toFixed(2)}</span>
-                            ${m.frozen_balance > 0 ? `<span style="color:#d97706;font-size:12px;margin-left:4px;">(冻结:${m.frozen_balance.toFixed(2)})</span>` : ''}
-                            <button class="btn btn-sm" style="margin-left:8px;padding:2px 6px;font-size:11px;" onclick="adjustBalance(${m.id}, '${m.name}', ${m.balance || 0})">调整</button>
+                            <span style="font-weight:600;color:#059669;">${parseFloat(m.balance || 0).toFixed(2)}</span>
+                            ${parseFloat(m.frozen_balance || 0) > 0 ? `<span style="color:#d97706;font-size:12px;margin-left:4px;">(冻结:${parseFloat(m.frozen_balance).toFixed(2)})</span>` : ''}
+                            <button class="btn btn-sm" style="margin-left:8px;padding:2px 6px;font-size:11px;" onclick="adjustBalance(${m.id}, '${m.name}', ${parseFloat(m.balance || 0)})">调整</button>
                         </td>
                         <td>${m.status === 1 ? '<span class="badge badge-success">正常</span>' : '<span class="badge badge-danger">禁用</span>'}</td>
                         <td>${m.created_at}</td>
                         <td>
+                            <button class="btn btn-sm" style="background:#f0fdf4;color:#059669;border:1px solid #86efac;" onclick="showCashier(${m.id}, '${m.pid}', '${m.name.replace(/'/g, "\\'")}')"><i class="fas fa-cash-register"></i> 收银台</button>
                             <button class="btn btn-sm" onclick="showMerchantKey(${m.id})">密钥</button>
                             <button class="btn btn-sm btn-primary" onclick="editMerchant(${m.id})">编辑</button>
                         </td>
@@ -1239,6 +1341,15 @@
                     <label>登录密码 (商户后台登录)</label>
                     <input type="password" id="merchantPassword" style="width:100%;padding:12px;border:1px solid #ddd;border-radius:8px;" placeholder="设置密码后商户可以登录商户后台">
                 </div>
+                <div class="form-group">
+                    <label>默认货币 (订单未指定 currency 时使用)</label>
+                    <select id="merchantDefaultCurrency" style="width:100%;padding:12px;border:1px solid #ddd;border-radius:8px;">
+                        <option value="USD" selected>USD - 美元</option>
+                        <option value="CNY">CNY - 人民币</option>
+                        <option value="USDT">USDT - 泰达币</option>
+                        <option value="EUR">EUR - 欧元</option>
+                    </select>
+                </div>
                 <button class="btn btn-primary" onclick="addMerchant()">创建商户</button>
             `;
             document.getElementById('modal').classList.add('show');
@@ -1250,7 +1361,8 @@
                 body: JSON.stringify({
                     name: document.getElementById('merchantName').value,
                     email: document.getElementById('merchantEmail').value,
-                    password: document.getElementById('merchantPassword').value
+                    password: document.getElementById('merchantPassword').value,
+                    default_currency: document.getElementById('merchantDefaultCurrency').value
                 })
             });
             if (data.code === 1) {
@@ -1345,6 +1457,15 @@
                         <option value="0" ${m.status === 0 ? 'selected' : ''}>禁用</option>
                     </select>
                 </div>
+                <div class="form-group">
+                    <label>默认货币 (订单未指定 currency 时使用)</label>
+                    <select id="editMerchantDefaultCurrency" style="width:100%;padding:12px;border:1px solid #ddd;border-radius:8px;">
+                        <option value="USD" ${(m.default_currency || 'USD') === 'USD' ? 'selected' : ''}>USD - 美元</option>
+                        <option value="CNY" ${m.default_currency === 'CNY' ? 'selected' : ''}>CNY - 人民币</option>
+                        <option value="USDT" ${m.default_currency === 'USDT' ? 'selected' : ''}>USDT - 泰达币</option>
+                        <option value="EUR" ${m.default_currency === 'EUR' ? 'selected' : ''}>EUR - 欧元</option>
+                    </select>
+                </div>
                 <hr style="margin:20px 0;border:none;border-top:1px solid #eee;">
                 <h4 style="margin-bottom:16px;color:#666;">白名单设置</h4>
                 <div class="form-group">
@@ -1377,7 +1498,8 @@
                 ip_whitelist_enabled: document.getElementById('editIPWhitelistEnabled').checked,
                 ip_whitelist: document.getElementById('editIPWhitelist').value,
                 referer_whitelist_enabled: document.getElementById('editRefererWhitelistEnabled').checked,
-                referer_whitelist: document.getElementById('editRefererWhitelist').value
+                referer_whitelist: document.getElementById('editRefererWhitelist').value,
+                default_currency: document.getElementById('editMerchantDefaultCurrency').value
             };
             const password = document.getElementById('editMerchantPassword').value;
             if (password) {
@@ -2361,9 +2483,8 @@
             }
             const order = data.data;
             const payType = order.type || order.chain || '-';
-            const isPassive = payType === 'wechat' || payType === 'alipay';
-            const isTRX = payType === 'trx';
-            const receivedAmount = isPassive ? `¥${order.money}` : (isTRX ? `${order.usdt_amount || '-'} TRX` : `${order.usdt_amount || '-'} USDT`);
+            const orderAmount = formatOrderAmount(order);
+            const receivedAmount = formatPaymentAmount(order);
 
             let statusText = '待支付';
             switch(order.status) {
@@ -2379,7 +2500,7 @@
                     <tr><td style="padding:8px;color:#666;">商户订单号:</td><td style="padding:8px;">${order.out_trade_no}</td></tr>
                     <tr><td style="padding:8px;color:#666;">商品名称:</td><td style="padding:8px;">${order.name || '-'}</td></tr>
                     <tr><td style="padding:8px;color:#666;">支付方式:</td><td style="padding:8px;">${getPaymentTypeBadge(payType)}</td></tr>
-                    <tr><td style="padding:8px;color:#666;">订单金额:</td><td style="padding:8px;">¥${order.money}</td></tr>
+                    <tr><td style="padding:8px;color:#666;">订单金额:</td><td style="padding:8px;">${orderAmount}</td></tr>
                     <tr><td style="padding:8px;color:#666;">实收金额:</td><td style="padding:8px;">${receivedAmount}</td></tr>
                     <tr><td style="padding:8px;color:#666;">汇率:</td><td style="padding:8px;">${order.rate || '-'}</td></tr>
                     <tr><td style="padding:8px;color:#666;">状态:</td><td style="padding:8px;">${getStatusBadge(order.status)}</td></tr>
@@ -2400,7 +2521,7 @@
 
         async function markOrderPaid(tradeNo) {
             const txHash = prompt('交易哈希(可选):');
-            const amount = prompt('实收金额(USDT):');
+            const amount = prompt('实收金额(按订单支付币种):');
             if (!amount) {
                 alert('请输入实收金额');
                 return;

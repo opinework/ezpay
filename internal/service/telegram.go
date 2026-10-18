@@ -422,14 +422,14 @@ func (s *TelegramService) handleStatus(chatID int64, user *TelegramUser) {
 通知状态: %s
 
 💰 *账户余额*
-可用余额: ¥%.2f
-冻结余额: ¥%.2f
+可用余额: $%s
+冻结余额: $%s
 
 📈 *今日统计*
 订单数: %d
-收款额: ¥%.2f`,
+收款额: $%.2f`,
 		merchant.PID, merchant.Name, notifyStatus,
-		merchant.Balance, merchant.FrozenBalance,
+		merchant.Balance.StringFixed(2), merchant.FrozenBalance.StringFixed(2),
 		todayOrders, todayAmount)
 
 	s.SendMessageMarkdown(chatID, msg)
@@ -647,15 +647,15 @@ func (s *TelegramService) NotifyBalanceChanged(merchantID uint, changeType strin
 func (s *TelegramService) NotifyWithdrawApplied(withdrawal *model.Withdrawal) {
 	msg := fmt.Sprintf(`💳 *提现申请已提交*
 
-提现金额: ¥%.2f
-手续费: ¥%.2f
-实际到账: ¥%.2f
+提现金额: $%s
+手续费: $%s
+实际到账: $%s
 打款方式: %s
 收款账号: %s
 收款人: %s
 
 ⏳ 等待管理员审核...`,
-		withdrawal.Amount, withdrawal.Fee, withdrawal.RealAmount,
+		withdrawal.Amount.StringFixed(2), withdrawal.Fee.StringFixed(2), withdrawal.RealAmount.StringFixed(2),
 		withdrawal.PayMethod,
 		s.maskAccount(withdrawal.Account),
 		withdrawal.AccountName)
@@ -667,13 +667,13 @@ func (s *TelegramService) NotifyWithdrawApplied(withdrawal *model.Withdrawal) {
 func (s *TelegramService) NotifyWithdrawApproved(withdrawal *model.Withdrawal) {
 	msg := fmt.Sprintf(`✅ *提现审批通过*
 
-提现金额: ¥%.2f
-实际到账: ¥%.2f
+提现金额: $%s
+实际到账: $%s
 打款方式: %s
 收款账号: %s
 
 管理员已通过您的提现申请，即将打款。`,
-		withdrawal.Amount, withdrawal.RealAmount,
+		withdrawal.Amount.StringFixed(2), withdrawal.RealAmount.StringFixed(2),
 		withdrawal.PayMethod,
 		s.maskAccount(withdrawal.Account))
 
@@ -684,11 +684,11 @@ func (s *TelegramService) NotifyWithdrawApproved(withdrawal *model.Withdrawal) {
 func (s *TelegramService) NotifyWithdrawRejected(withdrawal *model.Withdrawal, reason string) {
 	msg := fmt.Sprintf(`❌ *提现申请被拒绝*
 
-提现金额: ¥%.2f
+提现金额: $%s
 拒绝原因: %s
 
 资金已退回您的可用余额。`,
-		withdrawal.Amount, reason)
+		withdrawal.Amount.StringFixed(2), reason)
 
 	s.SendToMerchant(withdrawal.MerchantID, msg)
 }
@@ -697,14 +697,14 @@ func (s *TelegramService) NotifyWithdrawRejected(withdrawal *model.Withdrawal, r
 func (s *TelegramService) NotifyWithdrawPaid(withdrawal *model.Withdrawal) {
 	msg := fmt.Sprintf(`🎉 *提现已打款*
 
-提现金额: %.2f USDT
-实际到账: %.2f USDT
+提现金额: %s USD
+实际到账: %s USD
 打款方式: %s
 收款账号: %s
 收款人: %s
 
 请注意查收！`,
-		withdrawal.Amount, withdrawal.RealAmount,
+		withdrawal.Amount.StringFixed(2), withdrawal.RealAmount.StringFixed(2),
 		withdrawal.PayMethod,
 		s.maskAccount(withdrawal.Account),
 		withdrawal.AccountName)

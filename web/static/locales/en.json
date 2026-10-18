@@ -258,7 +258,7 @@
     "topMerchantsByOrders": "Top 5 Merchants by Orders",
     "rank": "Rank",
     "merchant": "Merchant",
-    "amount": "Amount (CNY)",
+    "amount": "Order Amount",
     "orderCount": "Orders"
   },
   "merchant": {
@@ -298,8 +298,8 @@
     "outTradeNo": "Merchant Order No",
     "merchantName": "Merchant",
     "productName": "Product Name",
-    "amount": "Amount (CNY)",
-    "usdtAmount": "Amount (USDT)",
+    "amount": "Order Amount",
+    "usdtAmount": "Payment Amount",
     "chain": "Payment Channel",
     "status": "Status",
     "statusPending": "Pending",

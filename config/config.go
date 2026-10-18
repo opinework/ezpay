@@ -2,9 +2,11 @@ package config
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 
 	"github.com/spf13/viper"
 )
@@ -32,6 +34,7 @@ type ServerConfig struct {
 }
 
 type DatabaseConfig struct {
+	Driver          string `mapstructure:"driver"`             // 数据库驱动: "mysql" (默认) 或 "sqlite"
 	Host            string `mapstructure:"host"`
 	Port            int    `mapstructure:"port"`
 	User            string `mapstructure:"user"`
@@ -165,6 +168,11 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
 	}
 
+	// 安全性检查
+	if cfg.JWT.Secret == "change-this-secret-key-in-production" {
+		log.Println("WARNING: 使用默认 JWT Secret，请在 config.yaml 中修改 jwt.secret 以确保安全")
+	}
+
 	return cfg, nil
 }
 
@@ -192,6 +200,7 @@ func setDefaults() {
 	viper.SetDefault("server.port", 6088)
 
 	// Database
+	viper.SetDefault("database.driver", "mysql")
 	viper.SetDefault("database.host", "127.0.0.1")
 	viper.SetDefault("database.port", 3306)
 	viper.SetDefault("database.user", "ezpay")
@@ -317,6 +326,7 @@ server:
   port: 6088
 
 database:
+  driver: "mysql"    # 数据库驱动: "mysql" 或 "sqlite" (SQLite 无需配置下方连接信息)
   host: "127.0.0.1"
   port: 3306
   user: "ezpay"
@@ -423,10 +433,24 @@ blockchain:
 
 	// 在可执行文件所在目录创建配置文件
 	configPath := filepath.Join(getExeDir(), "config.yaml")
-	return os.WriteFile(configPath, []byte(configContent), 0644)
+	return os.WriteFile(configPath, []byte(configContent), 0600)
 }
 
-func (c *DatabaseConfig) DSN() string {
+// GetDriver 返回标准化的数据库驱动名称
+func (c *DatabaseConfig) GetDriver() string {
+	driver := strings.ToLower(c.Driver)
+	if driver == "sqlite" || driver == "sqlite3" {
+		return "sqlite"
+	}
+	return "mysql"
+}
+
+// DSN 返回数据库连接字符串
+// dataDir 用于 SQLite 模式下存放数据库文件
+func (c *DatabaseConfig) DSN(dataDir string) string {
+	if c.GetDriver() == "sqlite" {
+		return filepath.Join(dataDir, "ezpay.db")
+	}
 	return fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=utf8mb4&parseTime=True&loc=Local",
 		c.User, c.Password, c.Host, c.Port, c.DBName)
 }

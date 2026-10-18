@@ -55,7 +55,12 @@ func (h *ChannelHandler) VmqNotify(c *gin.Context) {
 	}
 
 	// 解析实际金额
-	amount, _ := decimal.NewFromString(reallyPrice)
+	amount, err2 := decimal.NewFromString(reallyPrice)
+	if err2 != nil || amount.LessThanOrEqual(decimal.Zero) {
+		log.Printf("Vmq notify invalid amount: %s", reallyPrice)
+		c.String(http.StatusOK, "fail")
+		return
+	}
 
 	// 处理上游通知
 	if err := channelService.HandleUpstreamNotify(service.ChannelTypeVmq, localTradeNo, payID, amount); err != nil {
@@ -116,7 +121,12 @@ func (h *ChannelHandler) EpayNotify(c *gin.Context) {
 	}
 
 	// 解析金额
-	amount, _ := decimal.NewFromString(money)
+	amount, err2 := decimal.NewFromString(money)
+	if err2 != nil || amount.LessThanOrEqual(decimal.Zero) {
+		log.Printf("Epay notify invalid amount: %s", money)
+		c.String(http.StatusOK, "fail")
+		return
+	}
 
 	// 处理上游通知 (out_trade_no 是本地订单号)
 	if err := channelService.HandleUpstreamNotify(service.ChannelTypeEpay, outTradeNo, tradeNo, amount); err != nil {

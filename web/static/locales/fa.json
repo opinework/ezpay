@@ -87,7 +87,7 @@
     "topMerchantsByOrders": "۵ بازرگان برتر بر اساس سفارش",
     "rank": "رتبه",
     "merchant": "بازرگان",
-    "amount": "مبلغ (CNY)",
+    "amount": "مبلغ سفارش",
     "orderCount": "تعداد سفارش"
   },
   "merchant": {
@@ -127,7 +127,7 @@
     "outTradeNo": "شماره سفارش بازرگان",
     "merchantName": "بازرگان",
     "productName": "محصول",
-    "amount": "مبلغ (CNY)",
+    "amount": "مبلغ سفارش",
     "usdtAmount": "مبلغ (USDT)",
     "chain": "کانال پرداخت",
     "status": "وضعیت",

@@ -41,6 +41,16 @@ func escapeLike(s string) string {
 	return s
 }
 
+// parseParamID 解析 URL 路径参数中的 ID，必须为正整数
+func parseParamID(c *gin.Context) (int, bool) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil || id <= 0 {
+		c.JSON(http.StatusOK, gin.H{"code": -1, "msg": "无效的ID"})
+		return 0, false
+	}
+	return id, true
+}
+
 // AdminHandler 管理后台处理器
 type AdminHandler struct {
 	cfg *config.Config
@@ -80,6 +90,7 @@ func (h *AdminHandler) Login(c *gin.Context) {
 
 	// 生成JWT Token
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"type":     "admin",
 		"admin_id": admin.ID,
 		"username": admin.Username,
 		"exp":      time.Now().Add(24 * time.Hour).Unix(),
@@ -137,23 +148,23 @@ func (h *AdminHandler) DashboardTrend(c *gin.Context) {
 	case "today":
 		startDate = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 		dateFormat = "%H:00"
-		groupBy = "HOUR(created_at)"
+		groupBy = model.DateGroupBy("created_at", "hour")
 	case "week":
 		startDate = now.AddDate(0, 0, -6)
 		dateFormat = "%m-%d"
-		groupBy = "DATE(created_at)"
+		groupBy = model.DateGroupBy("created_at", "date")
 	case "month":
 		startDate = now.AddDate(0, 0, -29)
 		dateFormat = "%m-%d"
-		groupBy = "DATE(created_at)"
+		groupBy = model.DateGroupBy("created_at", "date")
 	case "3months":
 		startDate = now.AddDate(0, -3, 0)
 		dateFormat = "%Y-%m-%d"
-		groupBy = "YEARWEEK(created_at, 1)"
+		groupBy = model.DateGroupBy("created_at", "yearweek")
 	default:
 		startDate = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 		dateFormat = "%H:00"
-		groupBy = "HOUR(created_at)"
+		groupBy = model.DateGroupBy("created_at", "hour")
 	}
 
 	var trends []struct {
@@ -166,10 +177,11 @@ func (h *AdminHandler) DashboardTrend(c *gin.Context) {
 		Where("status = 1 AND created_at >= ?", startDate)
 
 	// 使用 settlement_amount 作为 USD 金额
+	dateFmtExpr := model.DateFormatParam("created_at")
 	if period == "3months" {
-		query.Select("MIN(DATE_FORMAT(created_at, ?)) as label, COUNT(*) as count, COALESCE(SUM(settlement_amount), 0) as amount_usd", dateFormat)
+		query.Select(fmt.Sprintf("MIN(%s) as label, COUNT(*) as count, COALESCE(SUM(settlement_amount), 0) as amount_usd", dateFmtExpr), dateFormat)
 	} else {
-		query.Select("DATE_FORMAT(created_at, ?) as label, COUNT(*) as count, COALESCE(SUM(settlement_amount), 0) as amount_usd", dateFormat)
+		query.Select(fmt.Sprintf("%s as label, COUNT(*) as count, COALESCE(SUM(settlement_amount), 0) as amount_usd", dateFmtExpr), dateFormat)
 	}
 
 	query.Group(groupBy).Order("label ASC").Scan(&trends)
@@ -294,10 +306,10 @@ func (h *AdminHandler) ListOrders(c *gin.Context) {
 
 	var result []OrderResponse
 	for _, order := range orders {
-		resp := OrderResponse{
-			Order:        order,
-			MerchantPID:  order.Merchant.PID,
-			MerchantName: order.Merchant.Name,
+		resp := OrderResponse{Order: order}
+		if order.Merchant != nil {
+			resp.MerchantPID = order.Merchant.PID
+			resp.MerchantName = order.Merchant.Name
 		}
 		result = append(result, resp)
 	}
@@ -382,7 +394,8 @@ func (h *AdminHandler) CleanInvalidOrders(c *gin.Context) {
 		model.OrderStatusExpired,
 		cutoffTime,
 	).Find(&orders).Error; err != nil {
-		c.JSON(http.StatusOK, gin.H{"code": -1, "msg": "查询失败: " + err.Error()})
+		log.Printf("查询失败: %v", err)
+		c.JSON(http.StatusOK, gin.H{"code": -1, "msg": "查询失败"})
 		return
 	}
 
@@ -390,12 +403,13 @@ func (h *AdminHandler) CleanInvalidOrders(c *gin.Context) {
 	refundCount := 0
 	var deletedCount int64
 	txErr := model.GetDB().Transaction(func(tx *gorm.DB) error {
-		// 退还预扣的手续费
+		// 退还预扣的手续费（在事务内操作，确保与删除一起回滚）
 		for _, order := range orders {
 			if order.FeeType == model.FeeTypeBalance && order.Status == model.OrderStatusPending {
-				fee, _ := order.Fee.Float64()
-				if fee > 0 {
-					if err := service.GetWithdrawService().RefundPreChargedFee(order.MerchantID, fee); err == nil {
+				feeDec := order.Fee
+				if feeDec.IsPositive() {
+					if err := tx.Model(&model.Merchant{}).Where("id = ?", order.MerchantID).
+						Update("frozen_balance", gorm.Expr("frozen_balance - ?", feeDec.String())).Error; err == nil {
 						refundCount++
 					}
 				}
@@ -441,14 +455,25 @@ func (h *AdminHandler) ListMerchants(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"code": 1, "data": merchants})
 }
 
+// isSupportedDefaultCurrency 校验商户默认货币
+func isSupportedDefaultCurrency(currency string) bool {
+	for _, c := range service.GetRateService().GetSupportedCurrencies() {
+		if c == currency {
+			return true
+		}
+	}
+	return false
+}
+
 // CreateMerchant 创建商户
 func (h *AdminHandler) CreateMerchant(c *gin.Context) {
 	var req struct {
-		Name      string `json:"name" binding:"required"`
-		Email     string `json:"email"`
-		Password  string `json:"password"` // 商户登录密码
-		NotifyURL string `json:"notify_url"`
-		ReturnURL string `json:"return_url"`
+		Name            string `json:"name" binding:"required"`
+		Email           string `json:"email"`
+		Password        string `json:"password"` // 商户登录密码
+		NotifyURL       string `json:"notify_url"`
+		ReturnURL       string `json:"return_url"`
+		DefaultCurrency string `json:"default_currency"` // 默认货币: USD / CNY / USDT / EUR
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -456,14 +481,24 @@ func (h *AdminHandler) CreateMerchant(c *gin.Context) {
 		return
 	}
 
+	defaultCurrency := service.NormalizeCurrency(req.DefaultCurrency)
+	if defaultCurrency == "" {
+		defaultCurrency = "USD"
+	}
+	if !isSupportedDefaultCurrency(defaultCurrency) {
+		c.JSON(http.StatusOK, gin.H{"code": -1, "msg": "不支持的默认货币"})
+		return
+	}
+
 	merchant := model.Merchant{
-		PID:       util.GenerateMerchantPID(),
-		Name:      req.Name,
-		Email:     req.Email,
-		Key:       util.GenerateMerchantKey(),
-		NotifyURL: req.NotifyURL,
-		ReturnURL: req.ReturnURL,
-		Status:    1,
+		PID:             util.GenerateMerchantPID(),
+		Name:            req.Name,
+		Email:           req.Email,
+		Key:             util.GenerateMerchantKey(),
+		NotifyURL:       req.NotifyURL,
+		ReturnURL:       req.ReturnURL,
+		Status:          1,
+		DefaultCurrency: defaultCurrency,
 	}
 
 	// 设置密码
@@ -486,7 +521,10 @@ func (h *AdminHandler) CreateMerchant(c *gin.Context) {
 
 // UpdateMerchant 更新商户
 func (h *AdminHandler) UpdateMerchant(c *gin.Context) {
-	id, _ := strconv.Atoi(c.Param("id"))
+	id, ok := parseParamID(c)
+	if !ok {
+		return
+	}
 	var req struct {
 		Name                    string `json:"name"`
 		Email                   string `json:"email"`
@@ -499,6 +537,7 @@ func (h *AdminHandler) UpdateMerchant(c *gin.Context) {
 		IPWhitelist             string `json:"ip_whitelist"`
 		RefererWhitelistEnabled *bool  `json:"referer_whitelist_enabled"`
 		RefererWhitelist        string `json:"referer_whitelist"`
+		DefaultCurrency         string `json:"default_currency"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -533,15 +572,27 @@ func (h *AdminHandler) UpdateMerchant(c *gin.Context) {
 	if req.Status != nil {
 		updates["status"] = *req.Status
 	}
-	// 白名单设置
+	// 白名单设置（仅在提供时更新，避免误清空）
 	if req.IPWhitelistEnabled != nil {
 		updates["ip_whitelist_enabled"] = *req.IPWhitelistEnabled
 	}
-	updates["ip_whitelist"] = req.IPWhitelist
+	if req.IPWhitelist != "" {
+		updates["ip_whitelist"] = req.IPWhitelist
+	}
 	if req.RefererWhitelistEnabled != nil {
 		updates["referer_whitelist_enabled"] = *req.RefererWhitelistEnabled
 	}
-	updates["referer_whitelist"] = req.RefererWhitelist
+	if req.RefererWhitelist != "" {
+		updates["referer_whitelist"] = req.RefererWhitelist
+	}
+	if req.DefaultCurrency != "" {
+		normalized := service.NormalizeCurrency(req.DefaultCurrency)
+		if !isSupportedDefaultCurrency(normalized) {
+			c.JSON(http.StatusOK, gin.H{"code": -1, "msg": "不支持的默认货币"})
+			return
+		}
+		updates["default_currency"] = normalized
+	}
 
 	if err := model.GetDB().Model(&model.Merchant{}).Where("id = ?", id).Updates(updates).Error; err != nil {
 		c.JSON(http.StatusOK, gin.H{"code": -1, "msg": "更新失败"})
@@ -553,11 +604,15 @@ func (h *AdminHandler) UpdateMerchant(c *gin.Context) {
 
 // AdjustMerchantBalance 调整商户余额
 func (h *AdminHandler) AdjustMerchantBalance(c *gin.Context) {
-	id, _ := strconv.Atoi(c.Param("id"))
+	id, ok := parseParamID(c)
+	if !ok {
+		return
+	}
 	var req struct {
-		Type   string  `json:"type"`   // add, subtract, set
-		Amount float64 `json:"amount"` // 金额
-		Remark string  `json:"remark"` // 备注
+		Type      string  `json:"type"`       // add, subtract, set
+		Amount    float64 `json:"amount"`     // 金额（兼容）
+		AmountStr string  `json:"amount_str"` // 高精度金额（优先）
+		Remark    string  `json:"remark"`     // 备注
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -576,37 +631,60 @@ func (h *AdminHandler) AdjustMerchantBalance(c *gin.Context) {
 		return
 	}
 
-	var newBalance float64
+	// 解析金额（优先使用字符串避免 float64 精度丢失）
+	var reqAmount decimal.Decimal
+	if req.AmountStr != "" {
+		var parseErr error
+		reqAmount, parseErr = decimal.NewFromString(req.AmountStr)
+		if parseErr != nil {
+			c.JSON(http.StatusOK, gin.H{"code": -1, "msg": "金额格式无效"})
+			return
+		}
+	} else {
+		reqAmount = decimal.NewFromFloat(req.Amount)
+	}
+	oldBalance := merchant.Balance // 保存旧余额用于日志
+	var result *gorm.DB
 	switch req.Type {
 	case "add":
-		newBalance = merchant.Balance + req.Amount
+		result = model.GetDB().Model(&model.Merchant{}).Where("id = ?", id).
+			Update("balance", gorm.Expr("balance + ?", reqAmount.String()))
 	case "subtract":
-		if merchant.Balance < req.Amount {
+		result = model.GetDB().Model(&model.Merchant{}).Where("id = ? AND balance >= ?", id, reqAmount.String()).
+			Update("balance", gorm.Expr("balance - ?", reqAmount.String()))
+		if result.Error == nil && result.RowsAffected == 0 {
 			c.JSON(http.StatusOK, gin.H{"code": -1, "msg": "余额不足"})
 			return
 		}
-		newBalance = merchant.Balance - req.Amount
 	case "set":
-		newBalance = req.Amount
+		result = model.GetDB().Model(&model.Merchant{}).Where("id = ?", id).
+			Update("balance", reqAmount)
 	default:
 		c.JSON(http.StatusOK, gin.H{"code": -1, "msg": "无效的调整类型"})
 		return
 	}
 
-	if err := model.GetDB().Model(&merchant).Update("balance", newBalance).Error; err != nil {
+	if result.Error != nil {
 		c.JSON(http.StatusOK, gin.H{"code": -1, "msg": "调整失败"})
 		return
 	}
 
+	// 重新加载商户获取新余额
+	model.GetDB().First(&merchant, id)
+	newBalance := merchant.Balance
+
 	// 记录日志
-	log.Printf("管理员调整商户[%d]余额: %.2f -> %.2f, 类型: %s, 备注: %s", id, merchant.Balance, newBalance, req.Type, req.Remark)
+	log.Printf("管理员调整商户[%d]余额: %s -> %s, 类型: %s, 备注: %s", id, oldBalance.StringFixed(2), newBalance.StringFixed(2), req.Type, req.Remark)
 
 	c.JSON(http.StatusOK, gin.H{"code": 1, "msg": "调整成功", "data": gin.H{"balance": newBalance}})
 }
 
 // ResetMerchantKey 重置商户密钥
 func (h *AdminHandler) ResetMerchantKey(c *gin.Context) {
-	id, _ := strconv.Atoi(c.Param("id"))
+	id, ok := parseParamID(c)
+	if !ok {
+		return
+	}
 	newKey := util.GenerateMerchantKey()
 
 	if err := model.GetDB().Model(&model.Merchant{}).Where("id = ?", id).Update("key", newKey).Error; err != nil {
@@ -619,7 +697,10 @@ func (h *AdminHandler) ResetMerchantKey(c *gin.Context) {
 
 // GetMerchantKey 获取商户密钥
 func (h *AdminHandler) GetMerchantKey(c *gin.Context) {
-	id, _ := strconv.Atoi(c.Param("id"))
+	id, ok := parseParamID(c)
+	if !ok {
+		return
+	}
 	var merchant model.Merchant
 	if err := model.GetDB().First(&merchant, id).Error; err != nil {
 		c.JSON(http.StatusOK, gin.H{"code": -1, "msg": "商户不存在"})
@@ -662,7 +743,7 @@ func (h *AdminHandler) ListWallets(c *gin.Context) {
 func (h *AdminHandler) CreateWallet(c *gin.Context) {
 	var req struct {
 		Chain      string `json:"chain" binding:"required"`
-		Address    string `json:"address"`     // 对于微信/支付宝可以为空，自动生成
+		Address    string `json:"address"` // 对于微信/支付宝可以为空，自动生成
 		Label      string `json:"label"`
 		QRCode     string `json:"qrcode"`      // 收款码图片路径 (微信/支付宝)
 		MerchantID uint   `json:"merchant_id"` // 商户ID，0为系统钱包
@@ -720,7 +801,8 @@ func (h *AdminHandler) CreateWallet(c *gin.Context) {
 
 	if err := model.GetDB().Create(&wallet).Error; err != nil {
 		// 输出详细错误信息便于调试
-		c.JSON(http.StatusOK, gin.H{"code": -1, "msg": "创建失败: " + err.Error()})
+		log.Printf("创建钱包失败: %v", err)
+		c.JSON(http.StatusOK, gin.H{"code": -1, "msg": "创建失败"})
 		return
 	}
 
@@ -761,14 +843,16 @@ func (h *AdminHandler) UploadQRCode(c *gin.Context) {
 	dataDir := config.Get().Storage.DataDir
 	qrcodeDir := dataDir + "/qrcode"
 	if err := os.MkdirAll(qrcodeDir, 0755); err != nil {
-		c.JSON(http.StatusOK, gin.H{"code": -1, "msg": "创建目录失败: " + err.Error()})
+		log.Printf("创建目录失败: %v", err)
+		c.JSON(http.StatusOK, gin.H{"code": -1, "msg": "文件上传失败"})
 		return
 	}
 	filepath := qrcodeDir + "/" + filename
 
 	// 保存文件
 	if err := c.SaveUploadedFile(file, filepath); err != nil {
-		c.JSON(http.StatusOK, gin.H{"code": -1, "msg": "保存文件失败: " + err.Error()})
+		log.Printf("保存文件失败: %v", err)
+		c.JSON(http.StatusOK, gin.H{"code": -1, "msg": "文件保存失败"})
 		return
 	}
 
@@ -797,7 +881,10 @@ func (h *AdminHandler) UploadQRCode(c *gin.Context) {
 
 // UpdateWallet 更新钱包
 func (h *AdminHandler) UpdateWallet(c *gin.Context) {
-	id, _ := strconv.Atoi(c.Param("id"))
+	id, ok := parseParamID(c)
+	if !ok {
+		return
+	}
 	var req struct {
 		Label  string `json:"label"`
 		Status *int8  `json:"status"`
@@ -829,7 +916,10 @@ func (h *AdminHandler) UpdateWallet(c *gin.Context) {
 
 // DeleteWallet 删除钱包
 func (h *AdminHandler) DeleteWallet(c *gin.Context) {
-	id, _ := strconv.Atoi(c.Param("id"))
+	id, ok := parseParamID(c)
+	if !ok {
+		return
+	}
 
 	// 使用事务确保检查和删除的原子性
 	txErr := model.GetDB().Transaction(func(tx *gorm.DB) error {
@@ -966,7 +1056,8 @@ func (h *AdminHandler) TestTelegramBot(c *gin.Context) {
 	url := fmt.Sprintf("https://api.telegram.org/bot%s/getMe", botToken)
 	resp, err := externalHTTPClient.Get(url)
 	if err != nil {
-		c.JSON(http.StatusOK, gin.H{"code": -1, "msg": "网络请求失败: " + err.Error()})
+		log.Printf("网络请求失败: %v", err)
+		c.JSON(http.StatusOK, gin.H{"code": -1, "msg": "网络请求失败"})
 		return
 	}
 	defer resp.Body.Close()
@@ -1303,7 +1394,7 @@ func (h *AdminHandler) ExportOrders(c *gin.Context) {
 	writer := csv.NewWriter(buf)
 
 	// 写入标题行
-	headers := []string{"交易号", "商户订单号", "商户PID", "商户名称", "支付类型", "金额(CNY)", "USDT金额", "汇率", "状态", "链", "收款地址", "交易哈希", "创建时间", "支付时间"}
+	headers := []string{"交易号", "商户订单号", "商户PID", "商户名称", "支付类型", "订单金额", "原始货币", "支付金额", "支付货币", "汇率", "状态", "链", "收款地址", "交易哈希", "创建时间", "支付时间"}
 	writer.Write(headers)
 
 	// 写入数据行
@@ -1337,7 +1428,9 @@ func (h *AdminHandler) ExportOrders(c *gin.Context) {
 			merchantName,
 			order.Type,
 			order.Money.String(),
-			order.USDTAmount.String(),
+			order.Currency,
+			order.UniqueAmount.String(),
+			order.PayCurrency,
 			order.Rate.String(),
 			statusText,
 			order.Chain,
@@ -1406,7 +1499,10 @@ func (h *AdminHandler) ListWithdrawals(c *gin.Context) {
 
 // ApproveWithdrawal 审核通过提现
 func (h *AdminHandler) ApproveWithdrawal(c *gin.Context) {
-	id, _ := strconv.Atoi(c.Param("id"))
+	id, ok := parseParamID(c)
+	if !ok {
+		return
+	}
 	var req struct {
 		AdminRemark string `json:"admin_remark"`
 	}
@@ -1425,7 +1521,10 @@ func (h *AdminHandler) ApproveWithdrawal(c *gin.Context) {
 
 // RejectWithdrawal 拒绝提现
 func (h *AdminHandler) RejectWithdrawal(c *gin.Context) {
-	id, _ := strconv.Atoi(c.Param("id"))
+	id, ok := parseParamID(c)
+	if !ok {
+		return
+	}
 	var req struct {
 		AdminRemark string `json:"admin_remark"`
 	}
@@ -1443,7 +1542,10 @@ func (h *AdminHandler) RejectWithdrawal(c *gin.Context) {
 
 // CompleteWithdrawal 完成打款
 func (h *AdminHandler) CompleteWithdrawal(c *gin.Context) {
-	id, _ := strconv.Atoi(c.Param("id"))
+	id, ok := parseParamID(c)
+	if !ok {
+		return
+	}
 	var req struct {
 		AdminRemark string `json:"admin_remark"`
 	}
@@ -1522,7 +1624,10 @@ func (h *AdminHandler) AddIPBlacklist(c *gin.Context) {
 
 // RemoveIPBlacklist 从黑名单移除IP
 func (h *AdminHandler) RemoveIPBlacklist(c *gin.Context) {
-	id, _ := strconv.Atoi(c.Param("id"))
+	id, ok := parseParamID(c)
+	if !ok {
+		return
+	}
 
 	if err := model.RemoveIPFromBlacklist(uint(id)); err != nil {
 		c.JSON(http.StatusOK, gin.H{"code": -1, "msg": "删除失败"})
@@ -1696,7 +1801,10 @@ func (h *AdminHandler) ListWithdrawAddresses(c *gin.Context) {
 
 // ApproveWithdrawAddress 审核通过提现地址
 func (h *AdminHandler) ApproveWithdrawAddress(c *gin.Context) {
-	id, _ := strconv.Atoi(c.Param("id"))
+	id, ok := parseParamID(c)
+	if !ok {
+		return
+	}
 
 	var address model.WithdrawAddress
 	if err := model.GetDB().First(&address, id).Error; err != nil {
@@ -1734,7 +1842,10 @@ func (h *AdminHandler) ApproveWithdrawAddress(c *gin.Context) {
 
 // RejectWithdrawAddress 拒绝提现地址
 func (h *AdminHandler) RejectWithdrawAddress(c *gin.Context) {
-	id, _ := strconv.Atoi(c.Param("id"))
+	id, ok := parseParamID(c)
+	if !ok {
+		return
+	}
 
 	var address model.WithdrawAddress
 	if err := model.GetDB().First(&address, id).Error; err != nil {
@@ -1847,7 +1958,8 @@ func (h *AdminHandler) UploadAppVersion(c *gin.Context) {
 
 	// 保存文件
 	if err := c.SaveUploadedFile(file, filePath); err != nil {
-		c.JSON(http.StatusOK, gin.H{"code": -1, "msg": "保存文件失败: " + err.Error()})
+		log.Printf("保存文件失败: %v", err)
+		c.JSON(http.StatusOK, gin.H{"code": -1, "msg": "文件保存失败"})
 		return
 	}
 
@@ -1899,7 +2011,10 @@ func (h *AdminHandler) UploadAppVersion(c *gin.Context) {
 
 // UpdateAppVersion 更新APP版本信息
 func (h *AdminHandler) UpdateAppVersion(c *gin.Context) {
-	id, _ := strconv.Atoi(c.Param("id"))
+	id, ok := parseParamID(c)
+	if !ok {
+		return
+	}
 
 	var version model.AppVersion
 	if err := model.GetDB().First(&version, id).Error; err != nil {
@@ -1938,7 +2053,10 @@ func (h *AdminHandler) UpdateAppVersion(c *gin.Context) {
 
 // DeleteAppVersion 删除APP版本
 func (h *AdminHandler) DeleteAppVersion(c *gin.Context) {
-	id, _ := strconv.Atoi(c.Param("id"))
+	id, ok := parseParamID(c)
+	if !ok {
+		return
+	}
 
 	var version model.AppVersion
 	if err := model.GetDB().First(&version, id).Error; err != nil {
@@ -1987,14 +2105,14 @@ func (h *AdminHandler) GetLatestAppVersion(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"code": 1,
 		"data": gin.H{
-			"has_update":    hasUpdate,
-			"version_code":  version.VersionCode,
-			"version_name":  version.VersionName,
-			"download_url":  downloadURL,
-			"file_size":     version.FileSize,
-			"md5":           version.MD5,
-			"changelog":     version.Changelog,
-			"force_update":  version.ForceUpdate,
+			"has_update":   hasUpdate,
+			"version_code": version.VersionCode,
+			"version_name": version.VersionName,
+			"download_url": downloadURL,
+			"file_size":    version.FileSize,
+			"md5":          version.MD5,
+			"changelog":    version.Changelog,
+			"force_update": version.ForceUpdate,
 		},
 	})
 }

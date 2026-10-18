@@ -20,7 +20,7 @@ type ExchangeRate struct {
 	FromCurrency string          `gorm:"type:varchar(10);not null" json:"from_currency"` // 源货币
 	ToCurrency   string          `gorm:"type:varchar(10);not null" json:"to_currency"`   // 目标货币
 	Rate         decimal.Decimal `gorm:"type:decimal(18,8);not null" json:"rate"`        // 基础汇率(中间价)
-	RateType     RateType        `gorm:"type:enum('manual','auto');default:'manual'" json:"rate_type"`
+	RateType     RateType        `gorm:"type:varchar(10);default:'manual'" json:"rate_type"`
 	Source       string          `gorm:"type:varchar(50)" json:"source"`           // 数据源(auto时)
 	AutoUpdate   bool            `gorm:"default:0" json:"auto_update"`             // 是否启用自动更新
 	LastUpdated  *time.Time      `gorm:"type:datetime(3)" json:"last_updated"`     // 最后更新时间

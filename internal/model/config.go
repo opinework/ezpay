@@ -7,7 +7,7 @@ import (
 // SystemConfig 系统配置表
 type SystemConfig struct {
 	ID          uint      `gorm:"primaryKey" json:"id"`
-	Key         string    `gorm:"type:varchar(50);uniqueIndex;not null" json:"key"`
+	Key         string    `gorm:"type:varchar(50);uniqueIndex:idx_system_configs_key;not null" json:"key"`
 	Value       string    `gorm:"type:text" json:"value"`
 	Description string    `gorm:"type:varchar(200)" json:"description"`
 	UpdatedAt   time.Time `json:"updated_at"`
@@ -44,7 +44,7 @@ const (
 // BlockScanProgress 区块扫描进度表（持久化每条链的扫描位置）
 type BlockScanProgress struct {
 	ID        uint      `gorm:"primaryKey" json:"id"`
-	Chain     string    `gorm:"type:varchar(20);uniqueIndex;not null" json:"chain"`
+	Chain     string    `gorm:"type:varchar(20);uniqueIndex:idx_block_scan_progress_chain;not null" json:"chain"`
 	LastBlock uint64    `gorm:"type:bigint unsigned;not null;default:0" json:"last_block"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
@@ -57,7 +57,7 @@ func (BlockScanProgress) TableName() string {
 type TransactionLog struct {
 	ID          uint      `gorm:"primaryKey" json:"id"`
 	Chain       string    `gorm:"type:varchar(20);not null;index" json:"chain"`
-	TxHash      string    `gorm:"type:varchar(100);uniqueIndex;not null" json:"tx_hash"`
+	TxHash      string    `gorm:"type:varchar(100);uniqueIndex:idx_transaction_logs_tx_hash;not null" json:"tx_hash"`
 	FromAddress string    `gorm:"type:varchar(100);index" json:"from_address"`
 	ToAddress   string    `gorm:"type:varchar(100);index" json:"to_address"`
 	Amount      string    `gorm:"type:varchar(50)" json:"amount"`
@@ -74,7 +74,7 @@ func (TransactionLog) TableName() string {
 // Admin 管理员表
 type Admin struct {
 	ID        uint      `gorm:"primaryKey" json:"id"`
-	Username  string    `gorm:"type:varchar(50);uniqueIndex;not null" json:"username"`
+	Username  string    `gorm:"type:varchar(50);uniqueIndex:idx_admins_username;not null" json:"username"`
 	Password  string    `gorm:"type:varchar(100);not null" json:"-"`
 	Email     string    `gorm:"type:varchar(100)" json:"email"`
 	Status    int8      `gorm:"default:1" json:"status"`

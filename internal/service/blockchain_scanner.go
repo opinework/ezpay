@@ -22,7 +22,7 @@ func (s *BlockchainService) scanTRXImproved(listener *ChainListener, addresses m
 		// 标准化地址（确保是 base58 格式）
 		addr = normalizeAddress(addr, listener.chain)
 
-		path := fmt.Sprintf("/v1/accounts/%s/transactions?only_confirmed=true&limit=50", addr)
+		path := fmt.Sprintf("/v1/accounts/%s/transactions?only_confirmed=true&limit=200", addr)
 
 		// 使用支持重试的 RPC 客户端
 		resp, err := rpcClient.Get(path)
@@ -89,10 +89,8 @@ func (s *BlockchainService) scanTRXImproved(listener *ChainListener, addresses m
 			if strings.HasPrefix(toAddr, "41") {
 				toAddr = hexToBase58(toAddr)
 			}
-			toAddr = strings.ToLower(toAddr)
-
-			// 检查是否是转入交易
-			if !addresses[toAddr] {
+			// 检查是否是转入交易（wallet cache 使用小写 key）
+			if !addresses[strings.ToLower(toAddr)] {
 				continue
 			}
 
@@ -135,7 +133,7 @@ func (s *BlockchainService) scanTRC20Improved(listener *ChainListener, addresses
 	for addr := range addresses {
 		addr = normalizeAddress(addr, listener.chain)
 
-		path := fmt.Sprintf("/v1/accounts/%s/transactions/trc20?only_confirmed=true&limit=50&contract_address=%s",
+		path := fmt.Sprintf("/v1/accounts/%s/transactions/trc20?only_confirmed=true&limit=200&contract_address=%s",
 			addr, listener.contractAddress)
 
 		resp, err := rpcClient.Get(path)
@@ -170,11 +168,8 @@ func (s *BlockchainService) scanTRC20Improved(listener *ChainListener, addresses
 		}
 
 		for _, tx := range result.Data {
-			// 标准化地址
-			toAddr := strings.ToLower(tx.To)
-
-			// 检查是否是转入交易
-			if !addresses[toAddr] {
+			// 检查是否是转入交易（wallet cache 使用小写 key）
+			if !addresses[strings.ToLower(tx.To)] {
 				continue
 			}
 
@@ -192,7 +187,7 @@ func (s *BlockchainService) scanTRC20Improved(listener *ChainListener, addresses
 			transfers = append(transfers, Transfer{
 				TxHash: tx.TransactionID,
 				From:   tx.From,
-				To:     toAddr,
+				To:     tx.To,
 				Amount: amount,
 				Chain:  "trc20",
 			})
@@ -311,14 +306,21 @@ func (s *BlockchainService) scanEVMImproved(listener *ChainListener, addresses m
 		}
 
 		for _, logEntry := range logs {
+			// ERC20 Transfer 事件需要 3 个 Topics: event sig, from, to
+			if len(logEntry.Topics) < 3 || len(logEntry.Topics[1]) < 27 || len(logEntry.Topics[2]) < 27 {
+				log.Printf("[%s] Skipping log with insufficient topics (tx: %s, topics: %d)",
+					listener.chain, logEntry.TransactionHash, len(logEntry.Topics))
+				continue
+			}
+
 			// 解析from地址
 			from := "0x" + logEntry.Topics[1][26:]
 
 			// 解析to地址
 			to := "0x" + logEntry.Topics[2][26:]
 
-			// 解析金额
-			amount := parseHexAmount(logEntry.Data, 6) // USDT精度是6位
+			// 解析金额（BEP20 USDT 是 18 位，其它 EVM 链 USDT 是 6 位）
+			amount := parseHexAmount(logEntry.Data, chainTokenDecimals(listener.chain))
 
 			// 检查是否已处理
 			var count int64

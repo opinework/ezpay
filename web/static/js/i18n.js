@@ -1,6 +1,6 @@
 /**
  * EzPay 国际化 (i18n) 模块
- * 支持语言: en, zh-CN, zh-TW, ru, fa
+ * 支持语言: en, zh-CN, zh-TW, ru, fa, vi, my
  */
 (function(global) {
     'use strict';

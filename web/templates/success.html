@@ -112,7 +112,7 @@
             </div>
             <div class="info-row">
                 <span class="info-label" data-i18n="order.usdtAmount">支付金额</span>
-                <span class="info-value">{{.order.USDTAmount}} USDT</span>
+                <span class="info-value">{{.order.UniqueAmount}} {{if .order.PayCurrency}}{{.order.PayCurrency}}{{else}}USDT{{end}}</span>
             </div>
             <div class="info-row">
                 <span class="info-label" data-i18n="order.paidTime">支付时间</span>

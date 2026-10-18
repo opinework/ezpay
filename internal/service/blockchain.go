@@ -17,6 +17,7 @@ import (
 	"ezpay/internal/model"
 
 	"github.com/shopspring/decimal"
+	"gorm.io/gorm"
 )
 
 // 全局 HTTP 客户端（带超时配置）
@@ -373,13 +374,24 @@ func (s *BlockchainService) scanChain(listener *ChainListener) {
 	}
 
 	if err != nil {
+		errMsg := err.Error()
+		// 如果 RPC 返回"历史已修剪"错误，跳过这些旧区块，推进到最新区块
+		if strings.Contains(errMsg, "pruned") || strings.Contains(errMsg, "Pruned") {
+			log.Printf("[%s] 历史区块已被修剪，跳过旧区块追赶到最新", listener.chain)
+			listener.lastBlock = 0 // 重置为 0，下次 scanEVM 会自动从最新区块-100 开始
+			// 保存进度
+			model.GetDB().Where("chain = ?", listener.chain).
+				Assign(model.BlockScanProgress{Chain: listener.chain, LastBlock: 0}).
+				FirstOrCreate(&model.BlockScanProgress{})
+			return
+		}
+
 		log.Printf("[%s] Scan error: %v", listener.chain, err)
 		s.metrics.RecordScanFailure(listener.chain, err)
 
 		// 检查是否需要告警
 		if shouldAlert, msg := s.metrics.ShouldAlert(listener.chain); shouldAlert {
 			log.Printf("⚠️  ALERT: %s", msg)
-			// TODO: 发送告警通知（Telegram/邮件等）
 		}
 		return
 	}
@@ -415,16 +427,15 @@ func (s *BlockchainService) scanTRX(listener *ChainListener, addresses map[strin
 
 	for addr := range addresses {
 		// 使用TronGrid API获取TRX转账记录
-		url := fmt.Sprintf("%s/v1/accounts/%s/transactions?only_confirmed=true&limit=50",
+		url := fmt.Sprintf("%s/v1/accounts/%s/transactions?only_confirmed=true&limit=200",
 			listener.rpc, addr)
 
 		resp, err := httpClient.Get(url)
 		if err != nil {
 			continue
 		}
-		defer resp.Body.Close()
-
 		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
 		if err != nil {
 			continue
 		}
@@ -519,16 +530,15 @@ func (s *BlockchainService) scanTRC20(listener *ChainListener, addresses map[str
 	var transfers []Transfer
 
 	for addr := range addresses {
-		url := fmt.Sprintf("%s/v1/accounts/%s/transactions/trc20?only_confirmed=true&limit=50&contract_address=%s",
+		url := fmt.Sprintf("%s/v1/accounts/%s/transactions/trc20?only_confirmed=true&limit=200&contract_address=%s",
 			listener.rpc, addr, listener.contractAddress)
 
 		resp, err := httpClient.Get(url)
 		if err != nil {
 			continue
 		}
-		defer resp.Body.Close()
-
 		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
 		if err != nil {
 			continue
 		}
@@ -600,6 +610,8 @@ func (s *BlockchainService) scanEVM(listener *ChainListener, addresses map[strin
 	// Transfer事件签名: 0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef
 	transferTopic := "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
 
+	hasFailure := false
+
 	for addr := range addresses {
 		// 将地址填充到32字节
 		paddedAddr := fmt.Sprintf("0x%064s", strings.TrimPrefix(strings.ToLower(addr), "0x"))
@@ -626,12 +638,14 @@ func (s *BlockchainService) scanEVM(listener *ChainListener, addresses map[strin
 		reqBody, _ := json.Marshal(params)
 		resp, err := httpClient.Post(listener.rpc, "application/json", bytes.NewReader(reqBody))
 		if err != nil {
+			hasFailure = true
 			continue
 		}
-		defer resp.Body.Close()
 
 		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
 		if err != nil {
+			hasFailure = true
 			continue
 		}
 
@@ -645,15 +659,21 @@ func (s *BlockchainService) scanEVM(listener *ChainListener, addresses map[strin
 		}
 
 		if err := json.Unmarshal(body, &result); err != nil {
+			hasFailure = true
 			continue
 		}
 
 		for _, log := range result.Result {
+			// ERC20 Transfer 事件需要至少 2 个 Topics
+			if len(log.Topics) < 2 || len(log.Topics[1]) < 27 {
+				continue
+			}
+
 			// 解析from地址
 			from := "0x" + log.Topics[1][26:]
 
-			// 解析金额
-			amount := parseHexAmount(log.Data, 6) // USDT精度是6位
+			// 解析金额（BEP20 USDT 是 18 位，其它 EVM 链 USDT 是 6 位）
+			amount := parseHexAmount(log.Data, chainTokenDecimals(listener.chain))
 
 			// 检查是否已处理
 			var count int64
@@ -675,7 +695,9 @@ func (s *BlockchainService) scanEVM(listener *ChainListener, addresses map[strin
 		}
 	}
 
-	listener.lastBlock = safeBlock
+	if !hasFailure {
+		listener.lastBlock = safeBlock
+	}
 	return transfers, nil
 }
 
@@ -732,7 +754,8 @@ func (s *BlockchainService) processTransfer(transfer Transfer) {
 	}
 
 	if err := model.GetDB().Create(&txLog).Error; err != nil {
-		log.Printf("Failed to create transaction log: %v", err)
+		// Duplicate tx_hash (unique constraint) means another goroutine already processed this
+		log.Printf("Transaction log already exists or create failed: %v", err)
 		return
 	}
 
@@ -764,42 +787,64 @@ func (s *BlockchainService) processTransfer(transfer Transfer) {
 			"paid_at":       &now,
 		}
 
-		// 使用 WHERE 条件确保只更新待支付的订单
-		result := model.GetDB().Model(order).
-			Where("status = ?", model.OrderStatusPending).
-			Updates(updates)
+		// 在事务中完成：更新订单状态 + 入账商户余额（保证原子性）
+		txErr := model.GetDB().Transaction(func(tx *gorm.DB) error {
+			// 使用 WHERE 条件确保只更新待支付的订单
+			result := tx.Model(order).
+				Where("status = ?", model.OrderStatusPending).
+				Updates(updates)
 
-		if result.Error != nil {
-			log.Printf("Failed to update order: %v", result.Error)
-			return
-		}
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected == 0 {
+				return fmt.Errorf("already processed")
+			}
 
-		// 如果没有更新任何行，说明订单已被其他进程处理
-		if result.RowsAffected == 0 {
-			log.Printf("Order %s already processed by another process", order.TradeNo)
+			// 更新交易日志
+			tx.Model(&txLog).Updates(map[string]interface{}{
+				"matched":  true,
+				"order_id": order.ID,
+			})
+
+			// 增加商户余额（在同一事务内，保证与订单状态更新的原子性）
+			realAmount := order.SettlementAmount.Sub(order.Fee)
+			if order.FeeType == model.FeeTypeBalance {
+				if err := tx.Model(&model.Merchant{}).Where("id = ?", order.MerchantID).Updates(map[string]interface{}{
+					"balance":        gorm.Expr("balance + ?", realAmount.String()),
+					"frozen_balance": gorm.Expr("frozen_balance - ?", order.Fee.String()),
+				}).Error; err != nil {
+					return err
+				}
+			} else {
+				if err := tx.Model(&model.Merchant{}).Where("id = ?", order.MerchantID).
+					Update("balance", gorm.Expr("balance + ?", realAmount.String())).Error; err != nil {
+					return err
+				}
+			}
+
+			return nil
+		})
+
+		if txErr != nil {
+			if txErr.Error() == "already processed" {
+				log.Printf("Order %s already processed by another process", order.TradeNo)
+			} else {
+				log.Printf("Failed to process order %s: %v", order.TradeNo, txErr)
+			}
 			return
 		}
 
 		// 使订单缓存失效
 		GetOrderService().InvalidateOrderCache(order.TradeNo)
 
-		// 更新交易日志
-		model.GetDB().Model(&txLog).Updates(map[string]interface{}{
-			"matched":  true,
-			"order_id": order.ID,
-		})
-
 		log.Printf("Order %s matched with tx %s, amount: %s", order.TradeNo, transfer.TxHash, transfer.Amount)
 
 		// 记录订单匹配
 		s.metrics.RecordOrderMatch(transfer.Chain)
 
-		// 增加商户余额（使用 USD 结算金额）
-		settlementAmount, _ := order.SettlementAmount.Float64()
-		fee, _ := order.Fee.Float64()
-		if err := GetWithdrawService().AddMerchantBalance(order.MerchantID, settlementAmount, fee, order.FeeType); err != nil {
-			log.Printf("Failed to add merchant balance for order %s: %v", order.TradeNo, err)
-		}
+		// 重新加载订单数据（更新后的状态）
+		model.GetDB().First(order, order.ID)
 
 		// 触发回调通知
 		go GetNotifyService().NotifyOrder(order.ID)
@@ -833,10 +878,16 @@ func (s *BlockchainService) matchOrder(transfer Transfer) *model.Order {
 	// 加密货币: 102.040023 USDT
 	// 法币: 100.01 CNY
 	// 条件：待支付状态 且 (未过期 或 过期时间在1分钟以内)
+	// TRC20/TRX 使用 base58 地址（大小写敏感），EVM 链使用小写地址
+	toAddr := transfer.To
+	if transfer.Chain != "trc20" && transfer.Chain != "trx" {
+		toAddr = strings.ToLower(transfer.To)
+	}
+
 	err := model.GetDB().
 		Where("chain = ? AND to_address = ? AND unique_amount = ? AND status = ? AND expired_at > ?",
 			transfer.Chain,
-			strings.ToLower(transfer.To),
+			toAddr,
 			normalizedAmount,
 			model.OrderStatusPending,
 			expiredTolerance).
@@ -848,7 +899,7 @@ func (s *BlockchainService) matchOrder(transfer Transfer) *model.Order {
 		err = model.GetDB().
 			Where("chain = ? AND to_address = ? AND usdt_amount = ? AND status = ? AND expired_at > ?",
 				transfer.Chain,
-				strings.ToLower(transfer.To),
+				toAddr,
 				normalizedAmount,
 				model.OrderStatusPending,
 				expiredTolerance).
@@ -1242,8 +1293,9 @@ func (s *BlockchainService) detectReorg(listener *ChainListener, currentBlock ui
 		
 		// 清空历史，重新扫描
 		listener.blockHistory = []uint64{currentBlock}
-		listener.lastBlock = currentBlock - uint64(listener.reorgDepth)
-		if listener.lastBlock < 0 {
+		if currentBlock > uint64(listener.reorgDepth) {
+			listener.lastBlock = currentBlock - uint64(listener.reorgDepth)
+		} else {
 			listener.lastBlock = 0
 		}
 		return true

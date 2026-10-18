@@ -87,7 +87,7 @@
     "topMerchantsByOrders": "Top 5 thương nhân theo đơn hàng",
     "rank": "Hạng",
     "merchant": "Thương nhân",
-    "amount": "Số tiền (CNY)",
+    "amount": "Số tiền đơn hàng",
     "orderCount": "Đơn hàng"
   },
   "merchant": {
@@ -127,7 +127,7 @@
     "outTradeNo": "Mã đơn thương nhân",
     "merchantName": "Thương nhân",
     "productName": "Sản phẩm",
-    "amount": "Số tiền (CNY)",
+    "amount": "Số tiền đơn hàng",
     "usdtAmount": "Số tiền (USDT)",
     "chain": "Kênh thanh toán",
     "status": "Trạng thái",

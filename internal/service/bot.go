@@ -121,7 +121,7 @@ func (s *BotService) NotifyOrderPaid(order *model.Order) {
 		order.ActualAmount.String(),
 		order.Chain,
 		maskTxHash(order.TxHash),
-		order.PaidAt.Format("2006-01-02 15:04:05"),
+		func() string { if order.PaidAt != nil { return order.PaidAt.Format("2006-01-02 15:04:05") }; return "-" }(),
 	)
 
 	go s.sendTelegram(message)

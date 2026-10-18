@@ -9,7 +9,7 @@ import (
 // AppVersion APP版本管理
 type AppVersion struct {
 	ID          uint           `gorm:"primaryKey" json:"id"`
-	VersionCode int            `gorm:"not null;uniqueIndex" json:"version_code"`                   // 版本号（数字，用于比较）
+	VersionCode int            `gorm:"not null;uniqueIndex:idx_app_versions_version_code" json:"version_code"`                   // 版本号（数字，用于比较）
 	VersionName string         `gorm:"size:50;not null" json:"version_name"`                       // 版本名称（如 1.0.0）
 	FileName    string         `gorm:"size:255;not null" json:"file_name"`                         // 文件名
 	FilePath    string         `gorm:"size:500;not null" json:"file_path"`                         // 文件存储路径

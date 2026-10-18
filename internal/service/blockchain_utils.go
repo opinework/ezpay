@@ -214,6 +214,22 @@ func parseTokenAmount(value string, decimals int) decimal.Decimal {
 	return amount.Div(divisor)
 }
 
+// chainTokenDecimals 返回每条链上 USDT (或主代币) 的精度位数
+// 注意：BSC 上的 USDT 合约是 18 位精度，与其它 EVM 链 (6 位) 不同
+//
+//	bep20  → 18 (BSC USDT 0x55d398326f99059fF775485246999027B3197955)
+//	erc20  → 6  (Ethereum USDT 0xdAC17F958D2ee523a2206206994597C13D831ec7)
+//	polygon/optimism/arbitrum/base/avalanche → 6 (USDT)
+//	trc20  → 6 (Tron USDT) — 由 Tron API 单独处理
+func chainTokenDecimals(chain string) int {
+	switch chain {
+	case "bep20":
+		return 18
+	default:
+		return 6
+	}
+}
+
 // parseHexAmount parses hex amount string
 func parseHexAmount(hexValue string, decimals int) decimal.Decimal {
 	hexValue = strings.TrimPrefix(hexValue, "0x")

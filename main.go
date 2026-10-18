@@ -1,12 +1,14 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"html/template"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -33,6 +35,14 @@ func main() {
 		log.Fatalf("Failed to load config: %v", err)
 	}
 
+	// 确保数据目录存在（SQLite 数据库文件存放于此）
+	if cfg.Database.GetDriver() == "sqlite" {
+		if err := os.MkdirAll(cfg.Storage.DataDir, 0755); err != nil {
+			log.Fatalf("Failed to create data directory: %v", err)
+		}
+		log.Printf("SQLite database: %s", filepath.Join(cfg.Storage.DataDir, "ezpay.db"))
+	}
+
 	// 初始化数据库（使用配置的连接池参数）
 	dbConfig := model.DBConfig{
 		MaxOpenConns:    cfg.Database.MaxOpenConns,
@@ -40,7 +50,7 @@ func main() {
 		ConnMaxLifetime: time.Duration(cfg.Database.ConnMaxLifetime) * time.Minute,
 		ConnMaxIdleTime: 10 * time.Minute,
 	}
-	if err := model.InitDBWithConfig(cfg.Database.DSN(), dbConfig); err != nil {
+	if err := model.InitDBWithConfig(cfg.Database.GetDriver(), cfg.Database.DSN(cfg.Storage.DataDir), dbConfig); err != nil {
 		log.Fatalf("Failed to init database: %v", err)
 	}
 
@@ -81,9 +91,14 @@ func main() {
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 	log.Printf("EzPay v%s (built %s) starting on %s", Version, BuildDate, addr)
 
-	// 优雅关闭
+	// 使用 http.Server 以支持优雅关闭
+	srv := &http.Server{
+		Addr:    addr,
+		Handler: r,
+	}
+
 	go func() {
-		if err := r.Run(addr); err != nil {
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("Server error: %v", err)
 		}
 	}()
@@ -94,6 +109,14 @@ func main() {
 	<-quit
 
 	log.Println("Shutting down server...")
+
+	// 给予请求最多 30 秒完成
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Printf("Server forced to shutdown: %v", err)
+	}
+
 	service.GetBlockchainService().Stop()
 	log.Println("Server exited")
 }
@@ -158,6 +181,7 @@ func registerRoutes(r *gin.Engine, cfg *config.Config) {
 		paymentAPI.GET("/appHeart", vmqHandler.AppHeart)
 		paymentAPI.GET("/appPush", vmqHandler.AppPush)
 		paymentAPI.GET("/getState", vmqHandler.GetState)
+		paymentAPI.GET("/checkOrder", vmqHandler.GetState)
 		paymentAPI.GET("/closeOrder", vmqHandler.CloseOrder)
 	}
 
@@ -434,11 +458,12 @@ func registerRoutes(r *gin.Engine, cfg *config.Config) {
 	})
 
 	// ============ APP公开接口 ============
-	r.GET("/api/app/version", adminHandler.GetLatestAppVersion)  // APP版本检测
-	r.GET("/api/app/download", adminHandler.DownloadApp)         // APP下载
+	r.GET("/api/app/version", adminHandler.GetLatestAppVersion) // APP版本检测
+	r.GET("/api/app/download", adminHandler.DownloadApp)        // APP下载
 
 	// ============ 公开支付接口 ============
-	r.GET("/api/payment-types", epayHandler.GetPaymentTypes)     // 获取支持的支付类型
+	r.GET("/api/payment-types", epayHandler.GetPaymentTypes) // 获取支持的支付类型
+	r.GET("/qrcode", epayHandler.QRCodeImage)                // 二维码图片生成 (mapi qrcode 字段指向此处)
 }
 
 // startBackgroundServices 启动后台服务

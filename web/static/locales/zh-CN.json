@@ -258,7 +258,7 @@
     "topMerchantsByOrders": "商户订单 TOP 5",
     "rank": "排名",
     "merchant": "商户",
-    "amount": "交易金额(CNY)",
+    "amount": "交易金额(USD)",
     "orderCount": "订单数"
   },
   "merchant": {
@@ -298,8 +298,8 @@
     "outTradeNo": "商户订单号",
     "merchantName": "商户",
     "productName": "商品名称",
-    "amount": "金额(CNY)",
-    "usdtAmount": "金额(USDT)",
+    "amount": "订单金额",
+    "usdtAmount": "支付金额",
     "chain": "支付通道",
     "status": "状态",
     "statusPending": "待支付",

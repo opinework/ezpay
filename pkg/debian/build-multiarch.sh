@@ -37,7 +37,11 @@ echo ""
 
 # Get version from git
 cd "$PROJECT_DIR"
-GIT_VERSION=$(git describe --tags --always --dirty 2>/dev/null | sed 's/^v//' || echo "1.0.1")
+GIT_VERSION=$(git describe --tags --always --dirty 2>/dev/null | sed 's/^v//' || echo "0.0.0")
+# Debian 版本号必须以数字开头，若 git describe 只返回 commit hash 则用 0.0.0
+if ! echo "$GIT_VERSION" | grep -qE '^[0-9]'; then
+    GIT_VERSION="0.0.0+${GIT_VERSION}"
+fi
 VERSION="${GIT_VERSION}-1"
 
 echo -e "${BLUE}Package version: $VERSION${NC}"
@@ -60,7 +64,7 @@ if [ ! -d "$PROJECT_DIR/debian" ]; then
     ln -sf pkg/debian debian
 fi
 
-RELEASE_DIR="$PROJECT_DIR/release"
+RELEASE_DIR="$PROJECT_DIR/release/debian"
 mkdir -p "$RELEASE_DIR"
 
 # Build for each architecture
@@ -172,7 +176,7 @@ EOF
         echo -e "${YELLOW}Building .deb package...${NC}"
         PACKAGE_NAME="ezpay_${VERSION}_${ARCH}.deb"
 
-        if fakeroot dpkg-deb --build "$PKG_DIR" "$RELEASE_DIR/$PACKAGE_NAME" > /dev/null 2>&1; then
+        if fakeroot dpkg-deb --build "$PKG_DIR" "$RELEASE_DIR/$PACKAGE_NAME"; then
             echo -e "${GREEN}✓ Package created: $PACKAGE_NAME${NC}"
             BUILD_SUCCESS+=("$ARCH")
 
@@ -181,6 +185,8 @@ EOF
             rm -rf "$PKG_DIR"
         else
             echo -e "${RED}✗ Failed to create package for $ARCH${NC}"
+            echo -e "${RED}  PKG_DIR contents:${NC}"
+            ls -la "$PKG_DIR/DEBIAN/" 2>/dev/null || echo "  DEBIAN dir missing"
             BUILD_FAILED+=("$ARCH")
         fi
     else

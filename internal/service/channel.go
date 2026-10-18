@@ -16,6 +16,7 @@ import (
 	"ezpay/internal/model"
 
 	"github.com/shopspring/decimal"
+	"gorm.io/gorm"
 )
 
 // channelHTTPClient 通道服务专用HTTP客户端
@@ -301,7 +302,7 @@ func (s *ChannelService) HandleUpstreamNotify(channelType ChannelType, localTrad
 		return nil
 	}
 
-	// 更新订单状态（使用乐观锁防止并发重复处理）
+	// 在事务中完成：更新订单状态 + 入账商户余额（保证原子性）
 	now := time.Now()
 	updates := map[string]interface{}{
 		"status":           model.OrderStatusPaid,
@@ -310,18 +311,32 @@ func (s *ChannelService) HandleUpstreamNotify(channelType ChannelType, localTrad
 		"channel_order_id": upstreamOrderID,
 	}
 
-	result := model.GetDB().Model(&order).
-		Where("status = ?", model.OrderStatusPending).
-		Updates(updates)
+	txErr := model.GetDB().Transaction(func(tx *gorm.DB) error {
+		result := tx.Model(&order).
+			Where("status = ?", model.OrderStatusPending).
+			Updates(updates)
 
-	if result.Error != nil {
-		return fmt.Errorf("update order failed: %w", result.Error)
-	}
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return nil // 已被其他进程处理
+		}
 
-	// 如果没有更新任何行，说明订单已被其他进程处理
-	if result.RowsAffected == 0 {
-		log.Printf("Order %s already processed by another process", localTradeNo)
-		return nil
+		// 增加商户余额（在同一事务内）
+		realAmount := order.SettlementAmount.Sub(order.Fee)
+		if order.FeeType == model.FeeTypeBalance {
+			return tx.Model(&model.Merchant{}).Where("id = ?", order.MerchantID).Updates(map[string]interface{}{
+				"balance":        gorm.Expr("balance + ?", realAmount.String()),
+				"frozen_balance": gorm.Expr("frozen_balance - ?", order.Fee.String()),
+			}).Error
+		}
+		return tx.Model(&model.Merchant{}).Where("id = ?", order.MerchantID).
+			Update("balance", gorm.Expr("balance + ?", realAmount.String())).Error
+	})
+
+	if txErr != nil {
+		return fmt.Errorf("update order failed: %w", txErr)
 	}
 
 	// 重新加载订单数据

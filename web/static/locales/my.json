@@ -87,7 +87,7 @@
     "topMerchantsByOrders": "ထိပ်တန်း ၅ ကုန်သည် (အော်ဒါ)",
     "rank": "အဆင့်",
     "merchant": "ကုန်သည်",
-    "amount": "ငွေပမာဏ (CNY)",
+    "amount": "အော်ဒါငွေပမာဏ",
     "orderCount": "အော်ဒါ"
   },
   "merchant": {
@@ -127,7 +127,7 @@
     "outTradeNo": "ကုန်သည်အော်ဒါနံပါတ်",
     "merchantName": "ကုန်သည်",
     "productName": "ထုတ်ကုန်",
-    "amount": "ငွေပမာဏ (CNY)",
+    "amount": "အော်ဒါငွေပမာဏ",
     "usdtAmount": "ငွေပမာဏ (USDT)",
     "chain": "ငွေပေးချေမှုချန်နယ်",
     "status": "အခြေအနေ",

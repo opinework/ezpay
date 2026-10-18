@@ -7,7 +7,7 @@ import (
 // IPBlacklist IP黑名单
 type IPBlacklist struct {
 	ID        uint      `gorm:"primaryKey" json:"id"`
-	IP        string    `gorm:"type:varchar(45);uniqueIndex;not null" json:"ip"` // 支持IPv6
+	IP        string    `gorm:"type:varchar(45);uniqueIndex:idx_ip_blacklists_ip;not null" json:"ip"` // 支持IPv6
 	Reason    string    `gorm:"type:varchar(200)" json:"reason"`                 // 拉黑原因
 	Source    string    `gorm:"type:varchar(50)" json:"source"`                  // 来源: manual(手动), api_log(API日志一键拉黑)
 	CreatedAt time.Time `json:"created_at"`

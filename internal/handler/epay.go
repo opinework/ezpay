@@ -1,9 +1,13 @@
 package handler
 
 import (
+	"crypto/hmac"
+	"encoding/base64"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
 	"ezpay/internal/middleware"
 	"ezpay/internal/model"
@@ -38,7 +42,7 @@ func (h *EpayHandler) Submit(c *gin.Context) {
 	param := c.DefaultQuery("param", c.PostForm("param"))
 
 	// 验证必填参数
-	if pid == "" || payType == "" || outTradeNo == "" || money == "" || sign == "" {
+	if pid == "" || payType == "" || outTradeNo == "" || name == "" || money == "" || sign == "" {
 		middleware.SetAPILogContext(c, -1, "参数不完整", "", 0, pid)
 		h.renderError(c, "参数不完整")
 		return
@@ -144,7 +148,7 @@ func (h *EpayHandler) MAPISubmit(c *gin.Context) {
 	param := c.DefaultQuery("param", c.PostForm("param"))
 
 	// 验证必填参数
-	if pid == "" || payType == "" || outTradeNo == "" || money == "" || sign == "" {
+	if pid == "" || payType == "" || outTradeNo == "" || name == "" || money == "" || sign == "" {
 		middleware.SetAPILogContext(c, -1, "参数不完整", "", 0, pid)
 		c.JSON(http.StatusOK, gin.H{
 			"code": -1,
@@ -243,43 +247,228 @@ func (h *EpayHandler) MAPISubmit(c *gin.Context) {
 	// 记录成功日志
 	middleware.SetAPILogContext(c, 1, "success", resp.TradeNo, merchant.ID, pid)
 
-	// 返回JSON
+	// 获取站点URL用于构建绝对路径
+	siteURL := ""
+	var siteConfig model.SystemConfig
+	if err := model.GetDB().Where("`key` = ?", "site_url").First(&siteConfig).Error; err == nil && siteConfig.Value != "" {
+		siteURL = strings.TrimRight(siteConfig.Value, "/")
+	} else {
+		// 从请求中推断
+		scheme := "http"
+		if c.Request.TLS != nil || c.GetHeader("X-Forwarded-Proto") == "https" {
+			scheme = "https"
+		}
+		siteURL = scheme + "://" + c.Request.Host
+	}
+
+	cashierURL := siteURL + "/cashier/" + resp.TradeNo
+
+	// 返回JSON（兼容 PHP 彩虹易支付标准字段名）
 	c.JSON(http.StatusOK, gin.H{
-		"code":         1,
-		"msg":          "success",
-		"trade_no":     resp.TradeNo,
-		"out_trade_no": resp.OutTradeNo,
-		"type":         resp.Type,
-		"currency":     resp.Currency,
-		"money":        resp.Money,
-		"pay_currency": resp.PayCurrency,
-		"pay_amount":   resp.PayAmount,
-		"usdt_amount":  resp.USDTAmount,
-		"rate":         resp.Rate,
-		"address":      resp.Address,
-		"chain":        resp.Chain,
-		"qrcode":       resp.QRCode,
-		"expired_at":   resp.ExpiredAt,
-		"pay_url":      "/cashier/" + resp.TradeNo,
+		"code":          1,
+		"msg":           "success",
+		"trade_no":      resp.TradeNo,
+		"out_trade_no":  resp.OutTradeNo,
+		"type":          resp.Type,
+		"currency":      resp.Currency,
+		"money":         resp.Money,
+		"pay_currency":  resp.PayCurrency,
+		"pay_amount":    resp.PayAmount,
+		"unique_amount": resp.UniqueAmount,
+		"usdt_amount":   resp.USDTAmount,
+		"rate":          resp.Rate,
+		"address":       resp.Address,
+		"chain":         resp.Chain,
+		"qrcode":        resp.QRCode,
+		"expired_at":    resp.ExpiredAt,
+		"payurl":        cashierURL, // PHP epay 标准字段名
+		"pay_url":       cashierURL, // 兼容字段
 	})
 }
 
 // API 通用API接口 (api.php 兼容)
 // GET /api.php?act=xxx
+//
+// 支持的 act:
+//   - order / query   — 单订单查询，鉴权: pid + key
+//   - orders          — 订单列表分页查询，鉴权: pid + key
+//   - getmoney        — 商户余额查询，鉴权: pid + key
+//   - refund          — 退款（明确拒绝：加密货币本质不可退）
 func (h *EpayHandler) API(c *gin.Context) {
 	act := c.Query("act")
 
 	switch act {
-	case "order":
+	case "order", "query":
 		h.queryOrder(c)
-	case "query":
-		h.queryOrder(c)
+	case "orders":
+		h.listOrders(c)
+	case "getmoney":
+		h.getMoney(c)
+	case "refund":
+		// 加密货币交易不可逆，平台不支持退款；老 PHP epay 商户脚本调用时给个明确响应
+		c.JSON(http.StatusOK, gin.H{
+			"code": -1,
+			"msg":  "本平台不支持退款（加密货币交易不可逆）；如需处理纠纷请联系平台管理员手动调整",
+		})
 	default:
 		c.JSON(http.StatusOK, gin.H{
 			"code": -1,
 			"msg":  "未知操作",
 		})
 	}
+}
+
+// authMerchantByKey 通过 pid + key 验证商户，返回商户对象
+// 用于 api.php 上的 GET 接口（query/orders/getmoney 等）
+func (h *EpayHandler) authMerchantByKey(c *gin.Context) (*model.Merchant, bool) {
+	pid := c.Query("pid")
+	key := c.Query("key")
+	if pid == "" || key == "" {
+		c.JSON(http.StatusOK, gin.H{"code": -1, "msg": "参数不完整"})
+		return nil, false
+	}
+
+	var merchant model.Merchant
+	if err := model.GetDB().Where("p_id = ?", pid).First(&merchant).Error; err != nil {
+		c.JSON(http.StatusOK, gin.H{"code": -1, "msg": "商户不存在"})
+		return nil, false
+	}
+	if !hmac.Equal([]byte(merchant.Key), []byte(key)) {
+		c.JSON(http.StatusOK, gin.H{"code": -1, "msg": "密钥错误"})
+		return nil, false
+	}
+	if merchant.Status != 1 {
+		c.JSON(http.StatusOK, gin.H{"code": -1, "msg": "商户已禁用"})
+		return nil, false
+	}
+	return &merchant, true
+}
+
+// listOrders 订单列表分页查询 (api.php?act=orders)
+//
+// 参数:
+//   - pid (必填), key (必填): 商户鉴权
+//   - limit (可选, 默认 20, 最大 100): 每页数量
+//   - offset (可选, 默认 0): 偏移
+//   - status (可选): 0=待支付 1=已支付 2=已过期 3=已取消，不传返回全部
+//   - start_time / end_time (可选, RFC3339 或 "2006-01-02 15:04:05"): 创建时间过滤
+//   - type (可选): 支付类型过滤 (如 usdt_trc20)
+func (h *EpayHandler) listOrders(c *gin.Context) {
+	merchant, ok := h.authMerchantByKey(c)
+	if !ok {
+		return
+	}
+
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
+	if offset < 0 {
+		offset = 0
+	}
+
+	q := model.GetDB().Model(&model.Order{}).Where("merchant_id = ?", merchant.ID)
+	if statusStr := c.Query("status"); statusStr != "" {
+		if s, err := strconv.Atoi(statusStr); err == nil {
+			q = q.Where("status = ?", s)
+		}
+	}
+	if t := c.Query("type"); t != "" {
+		q = q.Where("type = ?", t)
+	}
+	if st := c.Query("start_time"); st != "" {
+		if parsed, err := parseFlexibleTime(st); err == nil {
+			q = q.Where("created_at >= ?", parsed)
+		}
+	}
+	if et := c.Query("end_time"); et != "" {
+		if parsed, err := parseFlexibleTime(et); err == nil {
+			q = q.Where("created_at <= ?", parsed)
+		}
+	}
+
+	var total int64
+	q.Count(&total)
+
+	var orders []model.Order
+	if err := q.Order("created_at DESC").Limit(limit).Offset(offset).Find(&orders).Error; err != nil {
+		c.JSON(http.StatusOK, gin.H{"code": -1, "msg": "查询失败"})
+		return
+	}
+
+	// 转换为列表友好的精简字段
+	list := make([]gin.H, 0, len(orders))
+	for _, o := range orders {
+		tradeStatus := "WAIT_BUYER_PAY"
+		switch o.Status {
+		case model.OrderStatusPaid:
+			tradeStatus = "TRADE_SUCCESS"
+		case model.OrderStatusExpired, model.OrderStatusCancelled:
+			tradeStatus = "TRADE_CLOSED"
+		}
+		item := gin.H{
+			"trade_no":     o.TradeNo,
+			"out_trade_no": o.OutTradeNo,
+			"type":         o.Type,
+			"name":         o.Name,
+			"money":        o.Money.String(),
+			"currency":     o.Currency,
+			"pay_currency": o.PayCurrency,
+			"pay_amount":   o.UniqueAmount.String(),
+			"trade_status": tradeStatus,
+			"param":        o.Param,
+			"addtime":      o.CreatedAt.Unix(),
+			"endtime":      o.ExpiredAt.Unix(),
+		}
+		if o.PaidAt != nil {
+			item["paidtime"] = o.PaidAt.Unix()
+		}
+		list = append(list, item)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"code":   1,
+		"msg":    "success",
+		"pid":    merchant.PID,
+		"total":  total,
+		"limit":  limit,
+		"offset": offset,
+		"orders": list,
+	})
+}
+
+// getMoney 商户余额查询 (api.php?act=getmoney)
+//
+// 鉴权: pid + key
+// 返回: USD 余额、冻结余额、可用余额（balance - frozen）
+func (h *EpayHandler) getMoney(c *gin.Context) {
+	merchant, ok := h.authMerchantByKey(c)
+	if !ok {
+		return
+	}
+
+	available := merchant.Balance.Sub(merchant.FrozenBalance)
+	c.JSON(http.StatusOK, gin.H{
+		"code":           1,
+		"msg":            "success",
+		"pid":            merchant.PID,
+		"currency":       "USD", // 余额始终以 USD 统一结算
+		"balance":        merchant.Balance.String(),
+		"frozen_balance": merchant.FrozenBalance.String(),
+		"available":      available.String(),
+	})
+}
+
+// parseFlexibleTime 接受 RFC3339 或 "2006-01-02 15:04:05" 两种时间格式
+func parseFlexibleTime(s string) (time.Time, error) {
+	if t, err := time.Parse(time.RFC3339, s); err == nil {
+		return t, nil
+	}
+	return time.ParseInLocation("2006-01-02 15:04:05", s, time.Local)
 }
 
 // queryOrder 查询订单
@@ -307,7 +496,7 @@ func (h *EpayHandler) queryOrder(c *gin.Context) {
 		return
 	}
 
-	if merchant.Key != key {
+	if !hmac.Equal([]byte(merchant.Key), []byte(key)) {
 		c.JSON(http.StatusOK, gin.H{
 			"code": -1,
 			"msg":  "密钥错误",
@@ -339,6 +528,13 @@ func (h *EpayHandler) queryOrder(c *gin.Context) {
 		})
 		return
 	}
+	if order.MerchantID != merchant.ID {
+		c.JSON(http.StatusOK, gin.H{
+			"code": -1,
+			"msg":  "订单不存在",
+		})
+		return
+	}
 
 	// 返回订单信息
 	tradeStatus := "WAIT_BUYER_PAY"
@@ -361,6 +557,7 @@ func (h *EpayHandler) queryOrder(c *gin.Context) {
 		"money":        order.Money.String(),
 		"usdt_amount":  order.USDTAmount.String(),
 		"trade_status": tradeStatus,
+		"param":        order.Param,
 		"addtime":      order.CreatedAt.Unix(),
 		"endtime":      order.ExpiredAt.Unix(),
 	})
@@ -397,11 +594,63 @@ func (h *EpayHandler) CheckOrder(c *gin.Context) {
 	if paid && order.ReturnURL != "" {
 		// 构建返回URL
 		var merchant model.Merchant
-		model.GetDB().First(&merchant, order.MerchantID)
-		result["return_url"] = service.GetNotifyService().BuildReturnURL(order, &merchant)
+		if err := model.GetDB().First(&merchant, order.MerchantID).Error; err == nil {
+			result["return_url"] = service.GetNotifyService().BuildReturnURL(order, &merchant)
+		}
 	}
 
 	c.JSON(http.StatusOK, result)
+}
+
+// QRCodeImage 生成二维码 PNG 图片
+// GET /qrcode?text=...&size=300
+//
+// 用途：mapi 响应里 qrcode 字段的目标图片端点。商户可直接 <img src="..."> 嵌入。
+// 公开访问，无需鉴权（生成的内容由 text 参数完全决定，不读敏感数据）。
+// 限制：text 长度 ≤ 1024，size 范围 [64, 1024]，避免被滥用做 DoS
+func (h *EpayHandler) QRCodeImage(c *gin.Context) {
+	text := c.Query("text")
+	if text == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "msg": "text 参数不能为空"})
+		return
+	}
+	if len(text) > 1024 {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "msg": "text 过长"})
+		return
+	}
+
+	size := 300
+	if s := c.Query("size"); s != "" {
+		if n, err := strconv.Atoi(s); err == nil {
+			size = n
+		}
+	}
+	if size < 64 {
+		size = 64
+	}
+	if size > 1024 {
+		size = 1024
+	}
+
+	dataURI, err := util.GenerateQRCode(text, size)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "msg": "生成二维码失败"})
+		return
+	}
+	// dataURI 形如 "data:image/png;base64,xxxxx"，去掉前缀拿到 base64
+	idx := strings.Index(dataURI, ",")
+	if idx == -1 {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "msg": "生成二维码失败"})
+		return
+	}
+	pngBytes, err := base64.StdEncoding.DecodeString(dataURI[idx+1:])
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "msg": "生成二维码失败"})
+		return
+	}
+
+	c.Header("Cache-Control", "public, max-age=300")
+	c.Data(http.StatusOK, "image/png", pngBytes)
 }
 
 // renderError 渲染错误页面

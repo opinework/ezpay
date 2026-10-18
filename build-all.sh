@@ -1,269 +1,189 @@
 #!/bin/bash
-#
-# EzPay 全平台编译脚本
-# 使用方法: ./build-all.sh
-#
+# Master build script - Build all package formats
+# Supports: Arch Linux (.pkg.tar.zst), Debian (.deb), and Generic (.tar.gz)
 
 set -e
 
-# =============================================================================
-# 配置
-# =============================================================================
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$SCRIPT_DIR"
 
-# Go 编译器路径
-GO="/usr/bin/go"
-
-# 项目信息
-APP_NAME="ezpay"
-VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "dev")
-BUILDDATE=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
-
-# 输出目录
-RELEASE_DIR="release"
-
-# 编译参数
-LDFLAGS="-s -w -X main.Version=${VERSION} -X 'main.BuildDate=$BUILDDATE'"
-
-# 颜色输出
+# Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+CYAN='\033[0;36m'
+NC='\033[0m'
 
-# =============================================================================
-# 函数定义
-# =============================================================================
+# Print banner
+cat << 'EOF'
+╔═══════════════════════════════════════════════════════╗
+║       EzPay - Multi-Format Package Builder            ║
+║                                                       ║
+║  Builds packages for multiple distributions:          ║
+║  • Arch Linux (.pkg.tar.zst)                          ║
+║  • Debian/Ubuntu (.deb)                               ║
+║  • Generic Linux (.tar.gz)                            ║
+╚═══════════════════════════════════════════════════════╝
+EOF
 
-print_header() {
-    echo -e "${BLUE}=============================================${NC}"
-    echo -e "${BLUE}$1${NC}"
-    echo -e "${BLUE}=============================================${NC}"
-}
+echo ""
 
-print_step() {
-    echo -e "${YELLOW}>>> $1${NC}"
-}
+# Parse command line arguments
+BUILD_ARCH=true
+BUILD_DEB=true
+BUILD_TAR=true
 
-print_success() {
-    echo -e "${GREEN}✓ $1${NC}"
-}
+if [ "$#" -gt 0 ]; then
+    BUILD_ARCH=false
+    BUILD_DEB=false
+    BUILD_TAR=false
 
-print_error() {
-    echo -e "${RED}✗ $1${NC}"
-}
+    for arg in "$@"; do
+        case "$arg" in
+            --arch|--archlinux)
+                BUILD_ARCH=true
+                ;;
+            --deb|--debian)
+                BUILD_DEB=true
+                ;;
+            --tar|--tarball)
+                BUILD_TAR=true
+                ;;
+            --all)
+                BUILD_ARCH=true
+                BUILD_DEB=true
+                BUILD_TAR=true
+                ;;
+            --help|-h)
+                echo "Usage: $0 [options]"
+                echo ""
+                echo "Options:"
+                echo "  --arch, --archlinux    Build Arch Linux packages only"
+                echo "  --deb, --debian        Build Debian packages only"
+                echo "  --tar, --tarball       Build tarball packages only"
+                echo "  --all                  Build all formats (default)"
+                echo "  --help, -h             Show this help message"
+                echo ""
+                echo "Examples:"
+                echo "  $0                     # Build all formats"
+                echo "  $0 --arch              # Build only Arch Linux packages"
+                echo "  $0 --deb --tar         # Build Debian and tarball packages"
+                exit 0
+                ;;
+            *)
+                echo -e "${RED}Error: Unknown option '$arg'${NC}"
+                echo "Use --help for usage information"
+                exit 1
+                ;;
+        esac
+    done
+fi
 
-# 检查 Go 编译器
-check_go() {
-    if [ ! -f "$GO" ]; then
-        print_error "Go compiler not found at: $GO"
-        echo "Please update the GO variable in this script."
-        exit 1
-    fi
+# Build summary
+echo -e "${CYAN}Build Configuration:${NC}"
+[ "$BUILD_ARCH" = true ] && echo -e "  ${GREEN}✓${NC} Arch Linux (.pkg.tar.zst)" || echo -e "  ${YELLOW}✗${NC} Arch Linux (skipped)"
+[ "$BUILD_DEB" = true ] && echo -e "  ${GREEN}✓${NC} Debian (.deb)" || echo -e "  ${YELLOW}✗${NC} Debian (skipped)"
+[ "$BUILD_TAR" = true ] && echo -e "  ${GREEN}✓${NC} Generic Tarball (.tar.gz)" || echo -e "  ${YELLOW}✗${NC} Generic Tarball (skipped)"
+echo ""
 
-    GO_VERSION=$($GO version)
-    print_success "Go found: $GO_VERSION"
-}
+# Create release directory
+mkdir -p "$PROJECT_DIR/release"
 
-# 编译单个平台
-build_platform() {
-    local GOOS=$1
-    local GOARCH=$2
-    local OUTPUT=$3
-    local DESC=$4
+# Track build status
+BUILDS_SUCCEEDED=()
+BUILDS_FAILED=()
 
-    print_step "Building $DESC..."
+# Build Arch Linux packages
+if [ "$BUILD_ARCH" = true ]; then
+    echo -e "${BLUE}╔═══════════════════════════════════════════╗${NC}"
+    echo -e "${BLUE}║    Building Arch Linux Packages            ║${NC}"
+    echo -e "${BLUE}╚═══════════════════════════════════════════╝${NC}"
+    echo ""
 
-    CGO_ENABLED=0 GOOS=$GOOS GOARCH=$GOARCH $GO build \
-        -ldflags="$LDFLAGS" \
-        -o "$RELEASE_DIR/$OUTPUT" .
-
-    if [ $? -eq 0 ]; then
-        local SIZE=$(ls -lh "$RELEASE_DIR/$OUTPUT" | awk '{print $5}')
-        print_success "$OUTPUT ($SIZE)"
+    if bash "$PROJECT_DIR/pkg/archlinux/build-multiarch.sh"; then
+        BUILDS_SUCCEEDED+=("Arch Linux")
     else
-        print_error "Failed to build $OUTPUT"
-        return 1
+        BUILDS_FAILED+=("Arch Linux")
     fi
-}
-
-# =============================================================================
-# 主流程
-# =============================================================================
-
-main() {
-    print_header "EzPay Cross-Platform Build Script"
     echo ""
-    echo "Version: $VERSION"
-    echo "Build Date: $BUILDDATE"
+fi
+
+# Build Debian packages
+if [ "$BUILD_DEB" = true ]; then
+    echo -e "${BLUE}╔═══════════════════════════════════════════╗${NC}"
+    echo -e "${BLUE}║    Building Debian Packages                ║${NC}"
+    echo -e "${BLUE}╚═══════════════════════════════════════════╝${NC}"
     echo ""
 
-    # 检查 Go
-    check_go
-    echo ""
-
-    # 清理并创建输出目录
-    print_step "Preparing build directory..."
-    rm -rf "$RELEASE_DIR"
-    mkdir -p "$RELEASE_DIR"
-    print_success "Output directory: $RELEASE_DIR"
-    echo ""
-
-    # 开始编译
-    print_header "Building for all platforms"
-    echo ""
-
-    # Linux AMD64 (x86_64 服务器)
-    build_platform "linux" "amd64" "${APP_NAME}-linux-amd64" "Linux AMD64 (x86_64)"
-
-    # Linux ARM64 (ARM 服务器, 树莓派4等)
-    build_platform "linux" "arm64" "${APP_NAME}-linux-arm64" "Linux ARM64"
-
-    # Windows AMD64
-    build_platform "windows" "amd64" "${APP_NAME}-windows-amd64.exe" "Windows AMD64"
-
-    # macOS AMD64 (Intel Mac)
-    build_platform "darwin" "amd64" "${APP_NAME}-darwin-amd64" "macOS AMD64 (Intel)"
-
-    # macOS ARM64 (Apple Silicon M1/M2/M3/M4)
-    build_platform "darwin" "arm64" "${APP_NAME}-darwin-arm64" "macOS ARM64 (Apple Silicon)"
-
-    echo ""
-    print_header "Build Complete!"
-    echo ""
-    echo "Output files:"
-    ls -lh "$RELEASE_DIR/"
-    echo ""
-
-    # 询问是否创建发布包
-    read -p "Create distribution packages (.tar.gz/.zip)? [y/N] " -n 1 -r
-    echo
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        create_dist
+    if bash "$PROJECT_DIR/pkg/debian/build-multiarch.sh"; then
+        BUILDS_SUCCEEDED+=("Debian")
+    else
+        BUILDS_FAILED+=("Debian")
     fi
-}
+    echo ""
+fi
 
-# 创建发布包
-create_dist() {
-    print_header "Creating Distribution Packages"
+# Build Generic tarballs
+if [ "$BUILD_TAR" = true ]; then
+    echo -e "${BLUE}╔═══════════════════════════════════════════╗${NC}"
+    echo -e "${BLUE}║    Building Generic Tarballs               ║${NC}"
+    echo -e "${BLUE}╚═══════════════════════════════════════════╝${NC}"
     echo ""
 
-    mkdir -p "$RELEASE_DIR/dist"
-
-    # 复制配置文件模板
-    if [ -f "config.yaml" ]; then
-        cp config.yaml "$RELEASE_DIR/config.yaml.example"
+    if bash "$PROJECT_DIR/pkg/tarball/build-multiarch.sh"; then
+        BUILDS_SUCCEEDED+=("Tarball")
+    else
+        BUILDS_FAILED+=("Tarball")
     fi
-
-    print_step "Creating Linux AMD64 package..."
-    cd "$RELEASE_DIR"
-    tar -czf "dist/${APP_NAME}-${VERSION}-linux-amd64.tar.gz" "${APP_NAME}-linux-amd64" config.yaml.example 2>/dev/null || \
-    tar -czf "dist/${APP_NAME}-${VERSION}-linux-amd64.tar.gz" "${APP_NAME}-linux-amd64"
-    cd - > /dev/null
-
-    print_step "Creating Linux ARM64 package..."
-    cd "$RELEASE_DIR"
-    tar -czf "dist/${APP_NAME}-${VERSION}-linux-arm64.tar.gz" "${APP_NAME}-linux-arm64" config.yaml.example 2>/dev/null || \
-    tar -czf "dist/${APP_NAME}-${VERSION}-linux-arm64.tar.gz" "${APP_NAME}-linux-arm64"
-    cd - > /dev/null
-
-    print_step "Creating Windows package..."
-    cd "$RELEASE_DIR"
-    zip -q "dist/${APP_NAME}-${VERSION}-windows-amd64.zip" "${APP_NAME}-windows-amd64.exe" config.yaml.example 2>/dev/null || \
-    zip -q "dist/${APP_NAME}-${VERSION}-windows-amd64.zip" "${APP_NAME}-windows-amd64.exe"
-    cd - > /dev/null
-
-    print_step "Creating macOS Intel package..."
-    cd "$RELEASE_DIR"
-    tar -czf "dist/${APP_NAME}-${VERSION}-darwin-amd64.tar.gz" "${APP_NAME}-darwin-amd64" config.yaml.example 2>/dev/null || \
-    tar -czf "dist/${APP_NAME}-${VERSION}-darwin-amd64.tar.gz" "${APP_NAME}-darwin-amd64"
-    cd - > /dev/null
-
-    print_step "Creating macOS Apple Silicon package..."
-    cd "$RELEASE_DIR"
-    tar -czf "dist/${APP_NAME}-${VERSION}-darwin-arm64.tar.gz" "${APP_NAME}-darwin-arm64" config.yaml.example 2>/dev/null || \
-    tar -czf "dist/${APP_NAME}-${VERSION}-darwin-arm64.tar.gz" "${APP_NAME}-darwin-arm64"
-    cd - > /dev/null
-
     echo ""
-    print_success "Distribution packages created:"
-    ls -lh "$RELEASE_DIR/dist/"
-}
+fi
 
-# =============================================================================
-# 单平台编译选项
-# =============================================================================
+# Final summary
+echo ""
+echo -e "${BLUE}╔═══════════════════════════════════════════════════════╗${NC}"
+echo -e "${BLUE}║              Final Build Summary                      ║${NC}"
+echo -e "${BLUE}╚═══════════════════════════════════════════════════════╝${NC}"
+echo ""
 
-show_help() {
-    echo "EzPay Build Script"
+if [ ${#BUILDS_SUCCEEDED[@]} -gt 0 ]; then
+    echo -e "${GREEN}Successfully built:${NC}"
+    for build in "${BUILDS_SUCCEEDED[@]}"; do
+        echo -e "  ${GREEN}✓${NC} $build"
+    done
     echo ""
-    echo "Usage: $0 [option]"
+fi
+
+if [ ${#BUILDS_FAILED[@]} -gt 0 ]; then
+    echo -e "${RED}Failed builds:${NC}"
+    for build in "${BUILDS_FAILED[@]}"; do
+        echo -e "  ${RED}✗${NC} $build"
+    done
     echo ""
-    echo "Options:"
-    echo "  (no option)    Build all platforms"
-    echo "  linux          Build Linux AMD64 only"
-    echo "  linux-arm64    Build Linux ARM64 only"
-    echo "  windows        Build Windows AMD64 only"
-    echo "  macos          Build macOS Intel only"
-    echo "  macos-arm64    Build macOS Apple Silicon only"
-    echo "  dev            Build development version"
-    echo "  clean          Clean build artifacts"
-    echo "  help           Show this help message"
-}
+fi
 
-# =============================================================================
-# 入口
-# =============================================================================
+# Generate combined checksums
+echo -e "${CYAN}Generating checksums...${NC}"
+cd "$PROJECT_DIR/release"
+find . -name "*.pkg.tar.zst" -o -name "*.deb" -o -name "*.tar.gz" -o -name "*.zip" 2>/dev/null | \
+    xargs -r sha256sum > checksums.txt 2>/dev/null || true
+echo -e "  ${GREEN}✓${NC} Checksums generated"
+echo ""
 
-case "${1:-all}" in
-    "all"|"")
-        main
-        ;;
-    "linux")
-        check_go
-        mkdir -p "$RELEASE_DIR"
-        build_platform "linux" "amd64" "${APP_NAME}-linux-amd64" "Linux AMD64"
-        ;;
-    "linux-arm64")
-        check_go
-        mkdir -p "$RELEASE_DIR"
-        build_platform "linux" "arm64" "${APP_NAME}-linux-arm64" "Linux ARM64"
-        ;;
-    "windows")
-        check_go
-        mkdir -p "$RELEASE_DIR"
-        build_platform "windows" "amd64" "${APP_NAME}-windows-amd64.exe" "Windows AMD64"
-        ;;
-    "macos")
-        check_go
-        mkdir -p "$RELEASE_DIR"
-        build_platform "darwin" "amd64" "${APP_NAME}-darwin-amd64" "macOS Intel"
-        ;;
-    "macos-arm64")
-        check_go
-        mkdir -p "$RELEASE_DIR"
-        build_platform "darwin" "arm64" "${APP_NAME}-darwin-arm64" "macOS Apple Silicon"
-        ;;
-    "dev")
-        check_go
-        mkdir -p "bin"
-        print_step "Building development version..."
-        $GO build -tags dev -o "bin/${APP_NAME}" .
-        print_success "Development build: bin/${APP_NAME}"
-        ;;
-    "clean")
-        print_step "Cleaning build artifacts..."
-        rm -rf "$RELEASE_DIR"
-        rm -f "bin/${APP_NAME}"
-        print_success "Clean complete"
-        ;;
-    "help"|"-h"|"--help")
-        show_help
-        ;;
-    *)
-        print_error "Unknown option: $1"
-        echo ""
-        show_help
-        exit 1
-        ;;
-esac
+# List all created packages
+echo -e "${CYAN}All packages in: $PROJECT_DIR/release${NC}"
+echo ""
+echo -e "${BLUE}Arch Linux:${NC}"
+ls -lh "$PROJECT_DIR/release/archlinux/"*.pkg.tar.zst 2>/dev/null || echo "  (none)"
+echo -e "${BLUE}Debian:${NC}"
+ls -lh "$PROJECT_DIR/release/debian/"*.deb 2>/dev/null || echo "  (none)"
+echo -e "${BLUE}Tarball:${NC}"
+ls -lh "$PROJECT_DIR/release/tarball/"*.tar.gz "$PROJECT_DIR/release/tarball/"*.zip 2>/dev/null || echo "  (none)"
+echo ""
+
+echo -e "${YELLOW}═══════════════════════════════════════════════════════${NC}"
+echo -e "${YELLOW}Build process completed!${NC}"
+echo -e "${YELLOW}═══════════════════════════════════════════════════════${NC}"
+
+# Exit with error if any builds failed
+[ ${#BUILDS_FAILED[@]} -eq 0 ]

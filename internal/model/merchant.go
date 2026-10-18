@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
 )
 
@@ -60,17 +61,17 @@ func (n NotifySettings) Value() (driver.Value, error) {
 // Merchant 商户表
 type Merchant struct {
 	ID        uint           `gorm:"primaryKey" json:"id"`
-	PID       string         `gorm:"column:p_id;type:varchar(32);uniqueIndex;not null" json:"pid"`
+	PID       string         `gorm:"column:p_id;type:varchar(32);uniqueIndex:idx_merchants_p_id;not null" json:"pid"`
 	Name      string         `gorm:"type:varchar(100)" json:"name"`
 	Key       string         `gorm:"type:varchar(64);not null" json:"-"`
 	Password  string         `gorm:"type:varchar(100)" json:"-"`            // 商户登录密码 (bcrypt)
 	Email     string         `gorm:"type:varchar(100)" json:"email"`        // 联系邮箱
 	NotifyURL string         `gorm:"type:varchar(500)" json:"notify_url"`
 	ReturnURL string         `gorm:"type:varchar(500)" json:"return_url"`
-	Status       int8           `gorm:"default:1" json:"status"`                         // 1:正常 0:禁用
-	Balance      float64        `gorm:"type:decimal(18,2);default:0" json:"balance"`
-	FrozenBalance float64       `gorm:"type:decimal(18,2);default:0" json:"frozen_balance"` // 冻结余额(提现中)
-	FeeRate      float64        `gorm:"type:decimal(5,4);default:0" json:"fee_rate"`        // 手续费率 (如0.02表示2%)
+	Status       int8            `gorm:"default:1" json:"status"`                         // 1:正常 0:禁用
+	Balance      decimal.Decimal `gorm:"type:decimal(18,2);default:0" json:"balance"`
+	FrozenBalance decimal.Decimal `gorm:"type:decimal(18,2);default:0" json:"frozen_balance"` // 冻结余额(提现中)
+	FeeRate      decimal.Decimal `gorm:"type:decimal(5,4);default:0" json:"fee_rate"`        // 手续费率 (如0.02表示2%)
 	WalletLimit  int            `gorm:"default:10" json:"wallet_limit"`                     // 钱包数量限制, 0表示无限制
 	IPWhitelistEnabled bool     `gorm:"default:false" json:"ip_whitelist_enabled"`          // IP白名单是否启用
 	IPWhitelist  string         `gorm:"type:text" json:"ip_whitelist"`                      // IP白名单,逗号分隔
@@ -81,6 +82,7 @@ type Merchant struct {
 	TelegramStatus string         `gorm:"type:varchar(20);default:'unbound'" json:"telegram_status"` // Telegram状态: normal正常, blocked被封禁, unbound未绑定
 	NotifySettings NotifySettings `gorm:"type:json" json:"notify_settings"`                   // 通知设置详情
 	WalletMode     int8           `gorm:"default:3" json:"wallet_mode"`                       // 钱包模式: 1=仅系统钱包 2=仅个人钱包 3=两者同时(优先个人)
+	DefaultCurrency string        `gorm:"type:varchar(10);default:'USD'" json:"default_currency"` // 默认货币: USD / CNY / USDT / EUR (订单未指定 currency 时使用)
 	CreatedAt    time.Time      `json:"created_at"`
 	UpdatedAt    time.Time      `json:"updated_at"`
 	DeletedAt    gorm.DeletedAt `gorm:"index" json:"-"`
@@ -114,12 +116,12 @@ type Withdrawal struct {
 	ID              uint           `gorm:"primaryKey" json:"id"`
 	MerchantID      uint           `gorm:"index;not null" json:"merchant_id"`
 	Merchant        Merchant       `gorm:"foreignKey:MerchantID" json:"-"`
-	Amount          float64        `gorm:"type:decimal(18,2);not null" json:"amount"`          // 提现金额（USD）
-	Fee             float64        `gorm:"type:decimal(18,2);default:0" json:"fee"`            // 手续费（USD）
-	RealAmount      float64        `gorm:"type:decimal(18,2);not null" json:"real_amount"`     // 扣除手续费后金额（USD）
-	PayoutAmount    float64        `gorm:"type:decimal(18,6);default:0" json:"payout_amount"`  // 实际打款金额（USDT/TRX等）
-	PayoutCurrency  string         `gorm:"type:varchar(10)" json:"payout_currency"`            // 打款货币: USDT, TRX等
-	PayoutRate      float64        `gorm:"type:decimal(10,4);default:0" json:"payout_rate"`    // 打款汇率（卖出汇率）
+	Amount          decimal.Decimal `gorm:"type:decimal(18,2);not null" json:"amount"`          // 提现金额（USD）
+	Fee             decimal.Decimal `gorm:"type:decimal(18,2);default:0" json:"fee"`            // 手续费（USD）
+	RealAmount      decimal.Decimal `gorm:"type:decimal(18,2);not null" json:"real_amount"`     // 扣除手续费后金额（USD）
+	PayoutAmount    decimal.Decimal `gorm:"type:decimal(18,6);default:0" json:"payout_amount"`  // 实际打款金额（USDT/TRX等）
+	PayoutCurrency  string          `gorm:"type:varchar(10)" json:"payout_currency"`            // 打款货币: USDT, TRX等
+	PayoutRate      decimal.Decimal `gorm:"type:decimal(10,4);default:0" json:"payout_rate"`    // 打款汇率（卖出汇率）
 	PayMethod       string         `gorm:"type:varchar(20)" json:"pay_method"`                 // 打款方式: trc20, erc20, bep20等
 	Account         string         `gorm:"type:varchar(200)" json:"account"`                   // 收款账号
 	AccountName     string         `gorm:"type:varchar(100)" json:"account_name"`              // 收款人姓名

@@ -14,6 +14,8 @@ import (
 	"ezpay/internal/util"
 
 	"github.com/shopspring/decimal"
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // RateService 汇率服务
@@ -198,8 +200,14 @@ func (s *RateService) fetchOKXRate() (decimal.Decimal, error) {
 		return decimal.Zero, fmt.Errorf("no data from OKX")
 	}
 
-	// 假设 USDT ≈ 1 USD, USD/CNY ≈ 7.2
+	// USDT/USDC ≈ 1.0，使用数据库中已有的 CNY/USD 汇率，回退到 7.2
 	usdCny := decimal.NewFromFloat(7.2)
+	var dbRate model.ExchangeRate
+	if err := model.GetDB().Where("from_currency = ? AND to_currency = ?", "USD", "CNY").First(&dbRate).Error; err == nil {
+		if dbRate.Rate.GreaterThan(decimal.Zero) {
+			usdCny = dbRate.Rate
+		}
+	}
 
 	price, err := decimal.NewFromString(result.Data[0].Last)
 	if err != nil {
@@ -366,14 +374,23 @@ func (s *RateService) GetCachedRate() (decimal.Decimal, time.Time) {
 // 加密货币(USDT/TRX): 使用 0.000001-0.000999 随机偏移（6位小数）
 // 法币(CNY): 使用 0.01 递增偏移（2位小数）
 func (s *RateService) GenerateUniqueAmount(baseAmount decimal.Decimal, chain string) decimal.Decimal {
+	return s.GenerateUniqueAmountWithTx(model.GetDB(), baseAmount, chain)
+}
+
+// GenerateUniqueAmountWithTx 在指定事务内生成唯一标识金额（支持行锁防止并发冲突）
+func (s *RateService) GenerateUniqueAmountWithTx(tx *gorm.DB, baseAmount decimal.Decimal, chain string) decimal.Decimal {
 	// 判断是否为法币
 	isFiat := chain == "wechat" || chain == "alipay"
 
-	// 查找该链上待支付订单的唯一金额
+	// 查找该链上待支付订单的唯一金额（在事务中使用行锁防止并发生成相同金额）
 	var existingAmounts []string
-	model.GetDB().Model(&model.Order{}).
-		Where("chain = ? AND status = ?", chain, model.OrderStatusPending).
-		Pluck("unique_amount", &existingAmounts)
+	lockClause := clause.Locking{Strength: "UPDATE"}
+	query := tx.Model(&model.Order{}).
+		Where("chain = ? AND status = ?", chain, model.OrderStatusPending)
+	if !model.IsSQLite() {
+		query = query.Clauses(lockClause)
+	}
+	query.Pluck("unique_amount", &existingAmounts)
 
 	existingMap := make(map[string]bool)
 	for _, amt := range existingAmounts {
@@ -565,19 +582,31 @@ func (s *RateService) getBaseRate(fromCurrency, toCurrency string) (decimal.Deci
 		return decimal.NewFromInt(1).Div(eurRate), nil
 	}
 
-	// TRX 相关
+	// TRX 相关：使用 TRX/USDT (≈ TRX/USD) 作为基准
+	// 注意：GetTRXRate 返回的是 TRX/CNY (= trxUsdt × usdtCny)，单位不对，绝不能用于 TRX↔USD/USDT
 	if fromCurrency == "TRX" || toCurrency == "TRX" {
-		// TRX/USDT 汇率
-		trxRate, err := s.GetTRXRate()
+		trxUsdRate, err := s.GetTRXUSDRate()
 		if err != nil {
 			return decimal.Zero, err
 		}
+		if trxUsdRate.IsZero() {
+			return decimal.Zero, fmt.Errorf("TRX/USD 汇率为零")
+		}
 
+		// TRX <-> USDT (1:1 USDT≈USD)
 		if fromCurrency == "TRX" && toCurrency == "USDT" {
-			return trxRate, nil
+			return trxUsdRate, nil
 		}
 		if fromCurrency == "USDT" && toCurrency == "TRX" {
-			return decimal.NewFromInt(1).Div(trxRate), nil
+			return decimal.NewFromInt(1).Div(trxUsdRate), nil
+		}
+
+		// TRX <-> USD
+		if fromCurrency == "TRX" && toCurrency == "USD" {
+			return trxUsdRate, nil
+		}
+		if fromCurrency == "USD" && toCurrency == "TRX" {
+			return decimal.NewFromInt(1).Div(trxUsdRate), nil
 		}
 
 		// TRX <-> CNY: 通过 USDT 中转
@@ -586,56 +615,50 @@ func (s *RateService) getBaseRate(fromCurrency, toCurrency string) (decimal.Deci
 			if err != nil {
 				return decimal.Zero, err
 			}
-			if fromCurrency == "TRX" && toCurrency == "CNY" {
-				// TRX -> USDT -> CNY
-				return trxRate.Mul(cnyUsdtRate), nil
+			if cnyUsdtRate.IsZero() {
+				return decimal.Zero, fmt.Errorf("CNY/USDT 汇率为零")
 			}
-			// CNY -> TRX: CNY -> USDT -> TRX
-			usdtAmount := decimal.NewFromInt(1).Div(cnyUsdtRate)
-			return usdtAmount.Div(trxRate), nil
+			if fromCurrency == "TRX" && toCurrency == "CNY" {
+				// 1 TRX = trxUsdt USDT, 1 USDT = cnyUsdt CNY
+				return trxUsdRate.Mul(cnyUsdtRate), nil
+			}
+			// CNY -> TRX: 1 CNY = (1/cnyUsdt) USDT = (1/cnyUsdt)/trxUsdt TRX
+			return decimal.NewFromInt(1).Div(cnyUsdtRate).Div(trxUsdRate), nil
 		}
 	}
 
 	return decimal.Zero, fmt.Errorf("不支持的货币对: %s/%s", fromCurrency, toCurrency)
 }
 
-// ConvertToSettlementCurrency 将用户支付货币转换为内部结算货币（USD）
-// 使用买入汇率（含浮动），用于订单创建时
-// fromCurrency: 用户支付货币 (CNY, EUR, USDT 等)
-// amount: 支付金额
+// ConvertToSettlementCurrency 将订单原始货币换算为内部结算货币（USD）
+// 使用市场汇率（不含买卖浮动），结算金额代表订单的真实 USD 价值，将记入商户余额
+// 注意：买入浮动应在"USD → 支付货币"的用户支付腿上单独应用，不要在 settlement 阶段加，
+// 否则会出现"双重浮动"（同币种支付时用户多付，跨币种时商户被过度上账）
+// fromCurrency: 原始货币 (CNY, USD, USDT, EUR, TRX 等)
+// amount: 原始金额
 func (s *RateService) ConvertToSettlementCurrency(fromCurrency string, amount decimal.Decimal) (*ConvertResult, error) {
 	const settlementCurrency = "USD"
 
-	// 如果已经是 USD，直接返回
-	if fromCurrency == settlementCurrency {
+	// 同币种或 USD-USDT 同锚定: 1:1 直通
+	if fromCurrency == settlementCurrency || fromCurrency == "USDT" {
 		return &ConvertResult{
-			Amount:      amount,
+			Amount:      amount.Round(6),
 			Rate:        decimal.NewFromInt(1),
 			PayCurrency: settlementCurrency,
 		}, nil
 	}
 
-	// 使用买入汇率（用户支付，平台多收）
-	rate, err := s.GetRateWithType(RateTypeBuy, fromCurrency, settlementCurrency)
+	// 其它货币：使用市场基础汇率（无浮动）
+	rate, err := s.getBaseRate(fromCurrency, settlementCurrency)
 	if err != nil {
-		return nil, fmt.Errorf("获取买入汇率失败: %w", err)
+		return nil, fmt.Errorf("获取市场汇率失败: %w", err)
+	}
+	if rate.IsZero() {
+		return nil, fmt.Errorf("%s/%s 市场汇率为零", fromCurrency, settlementCurrency)
 	}
 
-	// 转换金额
-	var targetAmount decimal.Decimal
-	if fromCurrency == "CNY" {
-		// CNY -> USD: amount * rate (rate 是 1 CNY = X USD)
-		targetAmount = amount.Mul(rate).Round(6)
-	} else if fromCurrency == "EUR" {
-		// EUR -> USD: amount * rate
-		targetAmount = amount.Mul(rate).Round(6)
-	} else if fromCurrency == "USDT" {
-		// USDT -> USD: 约等于 1:1
-		targetAmount = amount.Round(6)
-		rate = decimal.NewFromInt(1)
-	} else {
-		return nil, fmt.Errorf("不支持的货币: %s", fromCurrency)
-	}
+	// 转换：amount × rate (rate 是 1 fromCurrency = X USD)
+	targetAmount := amount.Mul(rate).Round(6)
 
 	return &ConvertResult{
 		Amount:      targetAmount,
@@ -660,28 +683,43 @@ func (s *RateService) ConvertFromSettlementCurrency(usdAmount decimal.Decimal, t
 		}, nil
 	}
 
-	// 使用卖出汇率（商户提现，平台少给）
-	rate, err := s.GetRateWithType(RateTypeSell, settlementCurrency, targetCurrency)
-	if err != nil {
-		return nil, fmt.Errorf("获取卖出汇率失败: %w", err)
-	}
-
-	// 转换金额
-	var targetAmount decimal.Decimal
+	// 转换金额（每个分支单独取自己需要的汇率，避免对不需要的目标货币也发起一次 RPC）
+	var (
+		targetAmount decimal.Decimal
+		rate         decimal.Decimal
+	)
 	if targetCurrency == "USDT" {
 		// USD -> USDT: amount * rate (通常 1:1，但可配置卖出浮动)
+		r, err := s.GetRateWithType(RateTypeSell, settlementCurrency, targetCurrency)
+		if err != nil {
+			return nil, fmt.Errorf("获取卖出汇率失败: %w", err)
+		}
+		rate = r
 		targetAmount = usdAmount.Mul(rate).Round(6)
 	} else if targetCurrency == "TRX" {
-		// USD -> TRX: 先获取 TRX/USD 价格
+		// USD -> TRX: 直接从 Binance 获取 TRX/USD 价格 (仅一次 RPC)
 		trxUsdRate, err := s.GetTRXUSDRate()
 		if err != nil {
 			return nil, fmt.Errorf("获取TRX价格失败: %w", err)
 		}
-		// 应用卖出浮动
-		trxUsdRate = trxUsdRate.Mul(decimal.NewFromInt(1).Add(rate.Sub(decimal.NewFromInt(1))))
-		targetAmount = usdAmount.Div(trxUsdRate).Round(6)
+		if trxUsdRate.IsZero() {
+			return nil, fmt.Errorf("TRX/USD 汇率为零")
+		}
+		// 卖出浮动: 商户提现，平台少给 TRX
+		// 公式: targetAmount = usdAmount / trxUsdRate * (1 - sellFloat)
+		sellFloatStr := s.GetConfigValue(model.ConfigKeyRateSellFloat, "0")
+		sellFloat, _ := decimal.NewFromString(sellFloatStr)
+		adjusted := decimal.NewFromInt(1).Sub(sellFloat)
+		targetAmount = usdAmount.Div(trxUsdRate).Mul(adjusted).Round(6)
+		// rate 字段为最终的 USD->TRX 折算系数（每 1 USD 实际兑换的 TRX 数量）
+		rate = decimal.NewFromInt(1).Div(trxUsdRate).Mul(adjusted)
 	} else if targetCurrency == "CNY" {
 		// USD -> CNY: amount * rate
+		r, err := s.GetRateWithType(RateTypeSell, settlementCurrency, targetCurrency)
+		if err != nil {
+			return nil, fmt.Errorf("获取卖出汇率失败: %w", err)
+		}
+		rate = r
 		targetAmount = usdAmount.Mul(rate).Round(2)
 	} else {
 		return nil, fmt.Errorf("不支持的提现货币: %s", targetCurrency)
@@ -881,8 +919,12 @@ func (s *RateService) GetTRXUSDRate() (decimal.Decimal, error) {
 
 // getEURUSDRate 获取 EUR/USD 汇率
 func (s *RateService) getEURUSDRate() (decimal.Decimal, error) {
-	// 使用固定汇率或从API获取
-	// 这里简化处理，使用近似值
+	// 尝试从 Binance 获取实时汇率
+	rate, err := s.FetchEURToUSD()
+	if err == nil && rate.GreaterThan(decimal.Zero) {
+		return rate, nil
+	}
+	// 回退到近似值
 	return decimal.NewFromFloat(1.08), nil
 }
 
@@ -905,7 +947,7 @@ func NormalizeCurrency(currency string) string {
 	case "trx", "TRX":
 		return "TRX"
 	default:
-		return "CNY" // 默认 CNY
+		return "" // 返回空，由调用方决定默认值
 	}
 }
 

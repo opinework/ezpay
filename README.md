@@ -65,24 +65,59 @@
 ### 环境要求
 
 - Go 1.21+
-- MySQL/MariaDB 8.0+
+- MySQL/MariaDB 8.0+ 或 SQLite
+- Git
 
-### 安装运行
+### 1. 准备数据库
+
+SQLite 适合单机轻量部署或开发测试，只需在 `config.yaml` 中设置：
+
+```yaml
+database:
+  driver: "sqlite"
+storage:
+  data_dir: "/var/lib/ezpay"  # SQLite 文件会保存为 {data_dir}/ezpay.db
+```
+
+MySQL/MariaDB 适合生产高并发部署：
+
+```sql
+CREATE DATABASE ezpay CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER 'ezpay'@'localhost' IDENTIFIED BY 'your_password';
+GRANT ALL PRIVILEGES ON ezpay.* TO 'ezpay'@'localhost';
+FLUSH PRIVILEGES;
+```
+
+### 2. 构建和配置
 
 ```bash
-# 下载发布版本或编译
+# 编译当前平台生产版本
 make release
 
-# 编辑配置文件
-cp config.yaml.example config.yaml
-vim config.yaml
+# 准备运行目录配置文件
+cp config.yaml release/config.yaml
+vim release/config.yaml
+```
 
-# 初始化数据库（自动执行迁移）
-# 首次运行会自动创建表结构
+至少需要修改：
+
+- `database.*`: 数据库连接信息
+- `jwt.secret`: 生产环境必须改为随机长字符串
+- `storage.data_dir`: Linux 生产环境建议使用 `/var/lib/ezpay`
+- `blockchain.*.rpc`: 生产环境建议替换为稳定 RPC 节点
+
+### 3. 初始化并运行
+
+```bash
+# MySQL/MariaDB 推荐显式执行迁移
+# 先按实际数据库修改 db/migrate.sh 顶部 DB_HOST/DB_USER/DB_PASS/DB_NAME
+./db/migrate.sh migrate
 
 # 运行
-./ezpay
+cd release && ./ezpay
 ```
+
+> SQLite 模式不使用 MySQL 迁移脚本，程序启动时会通过 GORM `AutoMigrate` 初始化表结构。MySQL/MariaDB 生产环境仍建议使用 `db/migrate.sh` 管理数据库版本，便于备份、审计和回滚。执行迁移脚本时请确保脚本中的数据库连接与 `release/config.yaml` 一致。
 
 ### 访问地址
 
@@ -99,37 +134,46 @@ vim config.yaml
 ### 默认账号
 
 - **管理员**: `admin` / `admin123`
-- **测试商户**: `10001` / `123456`
+- **测试商户**:
+  - 通过 `db/migrate.sh` / `db/init.sql` 初始化：`10001` / `merchant123`
+  - 空库直接启动程序自动初始化：`1001` / `merchant123`
+- **默认 API Key**: `test_key_123456`
 
 > ⚠️ 首次登录后请立即修改密码！
 
 ## 编译构建
 
-### 使用 build-all.sh (推荐)
-
-```bash
-./build-all.sh              # 编译所有平台
-./build-all.sh dev          # 开发版本
-./build-all.sh linux        # 仅 Linux AMD64
-./build-all.sh linux-arm64  # 仅 Linux ARM64
-./build-all.sh windows      # 仅 Windows
-./build-all.sh macos        # 仅 macOS Intel
-./build-all.sh macos-arm64  # 仅 macOS Apple Silicon
-./build-all.sh clean        # 清理编译产物
-```
-
 ### 使用 Makefile
 
+适合本地开发、单平台构建和普通二进制分发：
+
 ```bash
-make dev         # 开发版本
-make release     # 生产版本
-make release-all # 全平台编译
-make dist        # 打包发布
+make setup-dev    # 初始化开发目录和 web 符号链接
+make dev          # 开发版本，输出 bin/ezpay
+make run-dev      # 编译并运行开发版本
+make release      # 当前平台生产版本，输出 release/ezpay
+make release-all  # 全平台二进制
+make dist         # 全平台 tar.gz/zip 分发包
+make clean        # 清理构建产物
+```
+
+> 如果 `make` 找不到 Go，可执行 `make GO=$(which go) dev`，或直接使用 `go build -tags dev -o bin/ezpay .`。
+
+### 使用 build-all.sh
+
+适合发布 Linux 系统包和通用 tarball：
+
+```bash
+./build-all.sh          # 构建所有格式 (Arch Linux + Debian + Tarball)
+./build-all.sh --arch   # 仅 Arch Linux .pkg.tar.zst
+./build-all.sh --deb    # 仅 Debian/Ubuntu .deb
+./build-all.sh --tar    # 仅通用 tar.gz/zip
+./build-all.sh --help   # 查看帮助
 ```
 
 ### 编译产物
 
-全平台编译后的文件位于 `release/` 目录：
+`make release-all` 的二进制位于 `release/` 目录：
 
 ```
 release/
@@ -138,6 +182,16 @@ release/
 ├── ezpay-windows-amd64.exe # Windows
 ├── ezpay-darwin-amd64      # macOS Intel
 └── ezpay-darwin-arm64      # macOS Apple Silicon
+```
+
+`./build-all.sh` 的系统包和通用包位于：
+
+```
+release/
+├── archlinux/
+├── debian/
+├── tarball/
+└── checksums.txt
 ```
 
 ## 配置说明
@@ -152,6 +206,7 @@ server:
 
 # 数据库
 database:
+  driver: "mysql"  # mysql 或 sqlite
   host: "127.0.0.1"
   port: 3306
   user: "ezpay"
@@ -213,23 +268,39 @@ blockchain:
 
 ## 汇率系统
 
-### USD 统一结算
+### USD 统一结算（v1.3.8 起）
 
-所有订单统一按 USD 结算，支持多币种支付：
+所有订单统一按 USD 结算，支持多币种支付。**结算金额 = 市场汇率折算的真实 USD 价值**（不含浮动），浮动只作用于跨币种的用户支付腿。
 
 ```
-用户支付: 100 CNY
-  ↓ 使用买入汇率(1 CNY = 0.14 USD × 1.02)
-结算金额: 100 × 0.14 × 1.02 = 14.28 USD
-  ↓ 计入商户余额
-商户余额: +14.28 USD
+跨币种示例: 商品 100 CNY → 用 USDT 支付
+  ↓ Step 1: 结算金额（市场汇率）
+    100 CNY × 0.139 = 13.89 USD
+  ↓ Step 2: 用户应付（跨币种应用买入浮动）
+    13.89 / (1 - 0.02) = 14.17 USDT
+  ↓
+  商户余额 +13.89 USD，平台浮动收入 ≈ 0.28 USDT (~2%)
+
+同币种示例: 商品 100 CNY → 用微信支付（CNY 通道）
+  ↓ Step 1: 结算金额
+    100 CNY × 0.139 = 13.89 USD
+  ↓ Step 2: 同币种直通，不应用浮动
+    pay_amount = 100 CNY
+  ↓
+  用户付 100 CNY，商户余额 +13.89 USD，平台仅收 FeeRate
 ```
+
+### 商户级默认货币
+
+每个商户可在后台配置 `default_currency`（USD/CNY/USDT/EUR）。订单创建时按 **请求 currency → 商户默认 → USD 兜底** 顺序解析。
+
+> **老 PHP 易支付 / V免签 客户端零代码迁移**：把商户默认货币设为 `CNY`，老代码请求的 `money` 或 `price` 自动按 CNY 计价。
 
 ### 买卖价差
 
-- **买入浮动**: 用户支付时，汇率上浮（如 +2%），平台多收
-- **卖出浮动**: 商户提现时，汇率下浮（如 -2%），平台少给
-- **利润空间**: 买卖价差 = 4%
+- **买入浮动** (`rate_buy_float`): 跨币种支付时平台多收（如 +2%）。同币种 / 同稳定锚定 (USD↔USDT) 不应用
+- **卖出浮动** (`rate_sell_float`): 商户提现时平台少给（如 -2%）
+- **利润空间**: 跨币种订单 ~ 买入浮动 + 卖出浮动；同币种订单仅 FeeRate
 
 ### 支持的汇率
 
@@ -357,9 +428,10 @@ blockchain:
 - ✅ **签名验证**: 所有 API 请求签名校验
 
 ### 通知安全
-- ✅ **异步回调**: 带签名的异步通知，失败自动重试
+- ✅ **异步回调**: 带签名的 GET 通知，失败自动重试
 - ✅ **同步跳转**: 带签名的同步跳转URL
 - ✅ **Telegram 封禁检测**: 自动停止向被封账号推送
+- ✅ **SSRF 防护**: 回调地址会拦截 localhost、内网和保留地址
 
 ## API 测试
 
@@ -382,15 +454,16 @@ curl -s "http://localhost:6088/admin/api/dashboard" \
 ### 创建订单（彩虹易支付格式）
 
 ```bash
-# 参数签名: MD5(参数排序&key=商户密钥)
+# 参数签名: 参数按键名排序后拼接，再追加商户密钥并 MD5
 curl "http://localhost:6088/submit.php" \
   -d "pid=10001" \
-  -d "type=trc20" \
+  -d "type=usdt_trc20" \
   -d "out_trade_no=ORDER123" \
   -d "notify_url=https://your-site.com/notify" \
   -d "return_url=https://your-site.com/return" \
   -d "name=测试商品" \
   -d "money=100" \
+  -d "currency=USD" \
   -d "sign=MD5签名"
 ```
 
@@ -410,15 +483,17 @@ curl -s "http://localhost:6088/health/detail"
 
 | 文档 | 说明 |
 |------|------|
-| [架构设计](./docs/01-ARCHITECTURE.md) | 项目结构、核心模块、性能优化 |
-| [构建指南](./docs/02-BUILD.md) | 开发/生产模式，跨平台编译 |
-| [部署指南](./docs/03-DEPLOY.md) | Systemd、Nginx、Docker |
+| [文档中心](./docs/README.md) | 接口文档和用户手册索引 |
 | [API文档](./docs/04-API.md) | 彩虹易支付/V免签兼容接口 |
 | [用户手册](./docs/05-USER_GUIDE.md) | 管理员和商户操作指南 |
-| [兼容性](./docs/06-COMPATIBILITY.md) | 彩虹易支付/V免签兼容对比 |
-| [Telegram](./docs/07-TELEGRAM.md) | Telegram 配置与测试 |
-| [国际化指南](./docs/08-I18N.md) | 多语言支持、翻译开发 |
-| [测试计划](./docs/09-TESTPLAN.md) | 功能测试计划 |
+
+### GitHub Actions 构建
+
+- 推送分支或创建 Pull Request 时，`CI` 工作流执行 Go 测试和生产版本编译。
+- 在 Actions 的 `Release` 工作流中选择 `Run workflow`，可手动打包全部格式，或单独选择 `archlinux`、`debian`、`tarball`。安装包和 `CHECKSUMS.txt` 可从该次运行的 Artifacts 下载。
+- 推送 `v*` 标签时，自动构建全格式安装包并创建 GitHub Release。手动构建仅上传 Artifacts。
+
+构建使用 Ubuntu 执行器和 Go 1.25，调用仓库内的 `build-all.sh` 和 `pkg/` 打包脚本。
 
 ## 系统要求
 
@@ -426,13 +501,13 @@ curl -s "http://localhost:6088/health/detail"
 - CPU: 1 核
 - 内存: 512MB
 - 硬盘: 10GB
-- 网络: 公网 IP（用于接收区块链回调）
+- 网络: 可访问 RPC 节点和汇率 API；生产环境建议具备公网 HTTPS 域名
 
 ### 推荐配置
 - CPU: 2 核
 - 内存: 2GB
 - 硬盘: 50GB SSD
-- 网络: 10Mbps+ 带宽
+- 网络: 10Mbps+ 带宽，稳定公网 HTTPS 域名（用于收银台、商户回调、Telegram Webhook）
 
 ## 性能指标
 
@@ -444,6 +519,8 @@ curl -s "http://localhost:6088/health/detail"
 - **并发支持**: 支持高并发场景
 - **RPC故障转移**: 多节点自动切换，指数退避重试
 - **链级限流**: 每条链独立配置请求速率
+
+> 性能指标会受数据库、RPC 节点、链确认数、钱包数量和日志量影响，生产环境上线前请做压测和回归测试。
 
 ## 商业节点推荐
 
@@ -471,8 +548,9 @@ blockchain:
 
 ## 交流群组
 
-- Telegram 交流群: https://t.me/OpineWorkOfficial
+- 加入 Telegram 交流群：[@OpineWorkOfficial](https://t.me/OpineWorkOfficial)
 - Telegram 频道: https://t.me/OpineWorkPublish
+- QQ群
 
 ## 贡献
 

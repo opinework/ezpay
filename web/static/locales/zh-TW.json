@@ -87,7 +87,7 @@
     "topMerchantsByOrders": "商戶訂單 TOP 5",
     "rank": "排名",
     "merchant": "商戶",
-    "amount": "交易金額(CNY)",
+    "amount": "交易金額(USD)",
     "orderCount": "訂單數"
   },
   "merchant": {
@@ -127,7 +127,7 @@
     "outTradeNo": "商戶訂單號",
     "merchantName": "商戶",
     "productName": "商品名稱",
-    "amount": "金額(CNY)",
+    "amount": "訂單金額",
     "usdtAmount": "金額(USDT)",
     "chain": "支付通道",
     "status": "狀態",

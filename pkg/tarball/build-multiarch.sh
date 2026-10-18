@@ -51,7 +51,7 @@ declare -A PLATFORMS=(
     ["windows-amd64"]="windows amd64"
 )
 
-RELEASE_DIR="$PROJECT_DIR/release"
+RELEASE_DIR="$PROJECT_DIR/release/tarball"
 mkdir -p "$RELEASE_DIR"
 
 BUILD_SUCCESS=()

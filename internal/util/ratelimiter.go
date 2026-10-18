@@ -51,15 +51,12 @@ func (r *RateLimiter) Allow() bool {
 	return false
 }
 
-// Wait 等待直到可以执行请求（阻塞）
+// Wait 等待直到可以执行请求（阻塞，最多等待30秒）
 func (r *RateLimiter) Wait() {
-	for {
-		if r.Allow() {
-			return
-		}
-		// 等待一小段时间后重试
-		time.Sleep(time.Millisecond * 50)
+	if r.Allow() {
+		return
 	}
+	r.WaitWithTimeout(30 * time.Second)
 }
 
 // WaitWithTimeout 等待直到可以执行请求，带超时（阻塞）

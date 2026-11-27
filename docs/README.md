@@ -1,35 +1,41 @@
-# EzPay 文档中心
+# EzPay 文档
 
-本目录保留 EzPay 的接口文档和用户手册。接口接入请阅读 API 文档，后台操作请阅读用户手册。
+本文档以当前工作区代码为准，命令默认在仓库根目录执行。应用入口为 `main.go`，没有 `--config`、`--migrate` 等命令行参数。
 
-加入 Telegram 交流群：[@OpineWorkOfficial](https://t.me/OpineWorkOfficial)。
+| 文档 | 内容 |
+| --- | --- |
+| [架构](./01-ARCHITECTURE.md) | 模块、资金流程、数据表、后台任务 |
+| [构建](./02-BUILD.md) | 开发、发布、跨平台、系统包、CI |
+| [部署与配置](./03-DEPLOY.md) | SQLite/MySQL、配置生效范围、备份、升级、反向代理 |
+| [API](./04-API.md) | 签名、下单、查询、通知、后台鉴权与通用请求 |
+| [操作手册](./05-USER_GUIDE.md) | 商户、钱包、官方通道、订单、提现、APP |
+| [兼容与迁移](./06-COMPATIBILITY.md) | 易支付、V免签、监控 v2 的兼容边界 |
+| [Telegram](./07-TELEGRAM.md) | 商户机器人、管理员通知、Webhook |
+| [国际化](./08-I18N.md) | 语言、翻译、RTL、检查命令 |
+| [测试与验收](./09-TESTPLAN.md) | 自动测试、MySQL、100 轮回归、真实支付验收 |
+| [监控协议](./10-MONITOR-PROTOCOL.md) | Android 收款事件认证、去重、重试 |
+| [官方支付](./11-OFFICIAL-PAYMENTS.md) | 支付宝当面付/网站支付、微信 Native/H5 |
+| [可靠性审查记录](./12-RELIABILITY-REVIEW.md) | 2026-11-27 的修复与历史验收结果 |
+| [完整路由表](./13-ROUTES.md) | 从 Go AST 生成的路由和直接声明参数 |
 
-## 快速阅读路径
+## 常用命令
 
-| 场景 | 建议阅读 | 目标 |
-|------|----------|------|
-| 管理员和商户操作 | [05-USER_GUIDE.md](./05-USER_GUIDE.md) | 了解后台功能、订单、钱包和提现操作 |
-| 商户接入 | [04-API.md](./04-API.md) | 对接彩虹易支付/V免签兼容接口 |
+需要 Go 1.26.11+；`-race` 还需要可用的 C 编译器。接口示例另需 `curl`、`jq`。
 
-## 文档清单
+```bash
+go version
+go test -race ./...
+go vet ./...
+go run docs/tools/check-docs.go
+go run docs/tools/check-docs.go -routes > docs/13-ROUTES.md
+CGO_ENABLED=0 go build -o release/ezpay .
+```
 
-| 文件 | 说明 | 主要维护时机 |
-|------|------|--------------|
-| [04-API.md](./04-API.md) | 公开支付接口、签名、回调、商户接口、错误码 | 路由、参数、响应字段或签名逻辑调整时 |
-| [05-USER_GUIDE.md](./05-USER_GUIDE.md) | 管理员和商户后台操作手册 | 页面功能、工作流、默认值调整时 |
+## 统一口径
 
-## 约定和口径
-
-- 内部结算货币统一为 **USD**；商户余额、统计和提现金额以 USD 为准。
-- `money` 表示商户创建订单时传入的原始金额（按 `currency` 计价），`settlement_amount` 是按市场汇率折算到 USD 的真实价值（计入余额），`pay_amount`/`unique_amount` 表示用户实际需要支付和链上匹配的金额。
-- **货币优先级**：请求 `currency` → 商户 `default_currency`（后台可配） → "USD" 兜底。老 PHP 易支付 / V免签 客户端兼容做法：把商户默认货币设为 `CNY`，零代码改动迁移。详见 [用户手册](./05-USER_GUIDE.md)。
-- **浮动只作用于跨币种支付腿**：同币种 / 同稳定锚定 (USD ↔ USDT) 订单不应用买入浮动，平台收入仅来自 FeeRate。
-- 生产环境必须修改默认管理员密码、商户密码、JWT 密钥、数据库密码，并启用 HTTPS。
-- 文档中的示例域名、Token、密钥、钱包地址均为占位符，不应直接用于生产。
-- 若文档与代码不一致，以当前代码和 `config.yaml`/`main.go` 路由为准，并及时修正文档。
-
-## 发布前文档检查
-
-1. 检查新增/变更接口是否同步到 [04-API.md](./04-API.md)。
-2. 检查后台操作和配置变化是否同步到 [05-USER_GUIDE.md](./05-USER_GUIDE.md)。
-3. 检查部署命令和包名是否与 `Makefile`、`build-all.sh`、`pkg/` 脚本一致。
+- 商户余额、冻结余额、结算金额、提现申请金额均按 USD 记账。
+- `money/currency` 是原订单标价；`pay_amount/pay_currency` 是付款金额；本地金额识别看 `unique_amount`。
+- 币种优先级：请求 `currency` → 商户默认币种 → USD。旧人民币客户端应将商户默认币种设置为 CNY。
+- `type` 选择付款方式，后台通道选择实际收款实现，两者独立。
+- YAML 配置、数据库配置、模板中的默认值并不等价，实际生效范围见[部署与配置](./03-DEPLOY.md)。
+- 历史审查结果不是对后续改动的保证；真实商户、链节点和业务压力验收仍需单独执行。

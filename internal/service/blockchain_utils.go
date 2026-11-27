@@ -187,6 +187,7 @@ func normalizeAddress(addr string, chain string) string {
 		if strings.HasPrefix(addr, "41") {
 			addr = hexToBase58(addr)
 		}
+		return addr
 	}
 
 	return strings.ToLower(addr)

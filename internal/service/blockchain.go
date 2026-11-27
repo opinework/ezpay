@@ -32,25 +32,25 @@ var httpClient = &http.Client{
 
 // BlockchainService 区块链监控服务
 type BlockchainService struct {
-	cfg          *config.Config
-	ctx          context.Context
-	cancel       context.CancelFunc
-	wg           sync.WaitGroup
-	listeners    map[string]*ChainListener
-	rpcClients   map[string]*RPCClient  // RPC 客户端（支持重试和故障转移）
-	metrics      *BlockchainMetrics     // 监控指标
-	mu           sync.RWMutex
-	walletCache  *WalletCache
-	gasPrices    map[string]float64     // Gas 价格缓存
-	gasPriceMu   sync.RWMutex
+	cfg         *config.Config
+	ctx         context.Context
+	cancel      context.CancelFunc
+	wg          sync.WaitGroup
+	listeners   map[string]*ChainListener
+	rpcClients  map[string]*RPCClient // RPC 客户端（支持重试和故障转移）
+	metrics     *BlockchainMetrics    // 监控指标
+	mu          sync.RWMutex
+	walletCache *WalletCache
+	gasPrices   map[string]float64 // Gas 价格缓存
+	gasPriceMu  sync.RWMutex
 }
 
 // WalletCache 钱包地址缓存
 type WalletCache struct {
-	mu          sync.RWMutex
-	cache       map[string]map[string]bool // chain -> addresses
-	lastUpdate  time.Time
-	ttl         time.Duration
+	mu         sync.RWMutex
+	cache      map[string]map[string]bool // chain -> addresses
+	lastUpdate time.Time
+	ttl        time.Duration
 }
 
 // NewWalletCache 创建钱包缓存
@@ -96,14 +96,16 @@ func (c *WalletCache) refresh() {
 
 	// 从数据库加载所有钱包
 	var wallets []model.Wallet
-	model.GetDB().Where("status = 1").Find(&wallets)
+	if err := model.GetDB().Where("status = 1").Find(&wallets).Error; err != nil {
+		return
+	}
 
 	newCache := make(map[string]map[string]bool)
 	for _, w := range wallets {
 		if newCache[w.Chain] == nil {
 			newCache[w.Chain] = make(map[string]bool)
 		}
-		newCache[w.Chain][strings.ToLower(w.Address)] = true
+		newCache[w.Chain][normalizeAddress(w.Address, w.Chain)] = true
 	}
 	c.cache = newCache
 	c.lastUpdate = time.Now()
@@ -118,25 +120,25 @@ func (c *WalletCache) Invalidate() {
 
 // ChainListener 链监听器
 type ChainListener struct {
-	chain           string
-	rpc             string
-	rpcBackups      []string           // RPC 备用节点
-	contractAddress string
-	confirmations   int
-	scanInterval    int
-	baseScanInterval int               // 基础扫描间隔
-	lastBlock       uint64
-	reorgDepth      int                // 重组检测深度
-	blockHistory    []uint64           // 区块历史（用于重组检测）
-	running         bool
-	enabled         bool
-	stopCh          chan struct{}
-	mu              sync.Mutex
+	chain            string
+	rpc              string
+	rpcBackups       []string // RPC 备用节点
+	contractAddress  string
+	confirmations    int
+	scanInterval     int
+	baseScanInterval int // 基础扫描间隔
+	lastBlock        uint64
+	reorgDepth       int      // 重组检测深度
+	blockHistory     []uint64 // 区块历史（用于重组检测）
+	running          bool
+	enabled          bool
+	stopCh           chan struct{}
+	mu               sync.Mutex
 	// 可配置的扫描参数（从config.yaml读取，0表示使用默认值）
-	maxBlockRange   int                // 单次查询最大区块范围
-	maxBatchSize    int                // 批量请求最大数量（1=不使用批量）
-	batchDelayMs    int                // 批次间延迟毫秒
-	rateLimit       float64            // 每秒最大请求数
+	maxBlockRange int     // 单次查询最大区块范围
+	maxBatchSize  int     // 批量请求最大数量（1=不使用批量）
+	batchDelayMs  int     // 批次间延迟毫秒
+	rateLimit     float64 // 每秒最大请求数
 }
 
 // Transfer 转账事件
@@ -147,6 +149,8 @@ type Transfer struct {
 	Amount      decimal.Decimal
 	BlockNumber uint64
 	Chain       string
+	EventID     string
+	Timestamp   time.Time
 }
 
 var blockchainService *BlockchainService
@@ -363,6 +367,7 @@ func (s *BlockchainService) scanChain(listener *ChainListener) {
 
 	var transfers []Transfer
 	var err error
+	previousBlock := listener.lastBlock
 
 	switch listener.chain {
 	case "trx":
@@ -387,6 +392,7 @@ func (s *BlockchainService) scanChain(listener *ChainListener) {
 		}
 
 		log.Printf("[%s] Scan error: %v", listener.chain, err)
+		listener.lastBlock = previousBlock
 		s.metrics.RecordScanFailure(listener.chain, err)
 
 		// 检查是否需要告警
@@ -399,13 +405,6 @@ func (s *BlockchainService) scanChain(listener *ChainListener) {
 	// 记录成功
 	s.metrics.RecordScanSuccess(listener.chain, startTime)
 
-	// 持久化扫描进度到数据库
-	if listener.lastBlock > 0 {
-		model.GetDB().Where("chain = ?", listener.chain).
-			Assign(model.BlockScanProgress{Chain: listener.chain, LastBlock: listener.lastBlock}).
-			FirstOrCreate(&model.BlockScanProgress{})
-	}
-
 	// 记录发现的转账
 	if len(transfers) > 0 {
 		log.Printf("[%s] Found %d transfers", listener.chain, len(transfers))
@@ -414,7 +413,17 @@ func (s *BlockchainService) scanChain(listener *ChainListener) {
 
 	// 处理转账
 	for _, transfer := range transfers {
-		s.processTransfer(transfer)
+		if err := s.processTransfer(transfer); err != nil {
+			listener.lastBlock = previousBlock
+			log.Printf("[%s] settlement failed, retaining scan checkpoint: %v", listener.chain, err)
+			return
+		}
+	}
+	if listener.lastBlock > 0 {
+		if err := model.GetDB().Where("chain = ?", listener.chain).Assign(model.BlockScanProgress{Chain: listener.chain, LastBlock: listener.lastBlock}).FirstOrCreate(&model.BlockScanProgress{}).Error; err != nil {
+			listener.lastBlock = previousBlock
+			return
+		}
 	}
 
 	// 动态调整扫描间隔
@@ -490,7 +499,7 @@ func (s *BlockchainService) scanTRX(listener *ChainListener, addresses map[strin
 			}
 
 			// 检查是否是转入交易
-			if !addresses[strings.ToLower(toAddr)] {
+			if !addresses[normalizeAddress(toAddr, listener.chain)] {
 				continue
 			}
 
@@ -545,10 +554,10 @@ func (s *BlockchainService) scanTRC20(listener *ChainListener, addresses map[str
 
 		var result struct {
 			Data []struct {
-				TransactionID string `json:"transaction_id"`
-				From          string `json:"from"`
-				To            string `json:"to"`
-				Value         string `json:"value"`
+				TransactionID  string `json:"transaction_id"`
+				From           string `json:"from"`
+				To             string `json:"to"`
+				Value          string `json:"value"`
 				BlockTimestamp int64  `json:"block_timestamp"`
 			} `json:"data"`
 		}
@@ -559,7 +568,7 @@ func (s *BlockchainService) scanTRC20(listener *ChainListener, addresses map[str
 
 		for _, tx := range result.Data {
 			// 检查是否是转入交易
-			if !addresses[strings.ToLower(tx.To)] {
+			if !addresses[normalizeAddress(tx.To, listener.chain)] {
 				continue
 			}
 
@@ -627,7 +636,7 @@ func (s *BlockchainService) scanEVM(listener *ChainListener, addresses map[strin
 					"address":   listener.contractAddress,
 					"topics": []interface{}{
 						transferTopic,
-						nil, // from address (any)
+						nil,        // from address (any)
 						paddedAddr, // to address
 					},
 				},
@@ -734,16 +743,26 @@ func (s *BlockchainService) getEVMBlockNumber(rpc string) (uint64, error) {
 }
 
 // processTransfer 处理转账事件
-func (s *BlockchainService) processTransfer(transfer Transfer) {
+func (s *BlockchainService) processTransfer(transfer Transfer) error {
+	if transfer.TxHash == "" || !transfer.Amount.IsPositive() {
+		return fmt.Errorf("invalid transfer")
+	}
 	// 检查交易是否已处理（防重复）
 	var existingLog model.TransactionLog
-	if err := model.GetDB().Where("tx_hash = ?", transfer.TxHash).First(&existingLog).Error; err == nil {
+	eventID := transfer.EventID
+	if eventID == "" {
+		eventID = transfer.TxHash
+	}
+	if err := model.GetDB().Where("chain = ? AND (event_id = ? OR (event_id IS NULL AND tx_hash = ?))", transfer.Chain, eventID, transfer.TxHash).First(&existingLog).Error; err == nil {
 		// 交易已存在，跳过处理
-		return
+		return nil
+	} else if err != gorm.ErrRecordNotFound {
+		return err
 	}
 
 	// 记录交易日志
 	txLog := model.TransactionLog{
+		EventID:     &eventID,
 		Chain:       transfer.Chain,
 		TxHash:      transfer.TxHash,
 		FromAddress: transfer.From,
@@ -753,23 +772,25 @@ func (s *BlockchainService) processTransfer(transfer Transfer) {
 		Matched:     false,
 	}
 
-	if err := model.GetDB().Create(&txLog).Error; err != nil {
-		// Duplicate tx_hash (unique constraint) means another goroutine already processed this
-		log.Printf("Transaction log already exists or create failed: %v", err)
-		return
-	}
-
 	// 查找匹配的订单
-	order := s.matchOrder(transfer)
+	order, matchErr := s.matchOrderResult(transfer)
+	if matchErr != nil {
+		return matchErr
+	}
 	if order != nil {
 		// 再次检查订单状态，防止并发重复处理
-		if order.Status != model.OrderStatusPending {
+		if order.Status != model.OrderStatusPending && order.Status != model.OrderStatusExpired {
 			log.Printf("Order %s already processed, status: %d", order.TradeNo, order.Status)
-			return
+			return nil
 		}
 
 		// 更新订单状态（使用乐观锁）
 		now := time.Now()
+		paidTime := now
+		if !transfer.Timestamp.IsZero() {
+			paidTime = transfer.Timestamp
+		}
+		previousStatus := order.Status
 
 		// 实际支付金额也需要截断到标准精度（与unique_amount一致）
 		var actualAmount decimal.Decimal
@@ -784,14 +805,20 @@ func (s *BlockchainService) processTransfer(transfer Transfer) {
 			"tx_hash":       transfer.TxHash,
 			"from_address":  transfer.From,
 			"actual_amount": actualAmount,
-			"paid_at":       &now,
+			"paid_at":       &paidTime,
+		}
+		if order.NotifyURL != "" {
+			updates["notify_status"] = model.NotifyStatusFailed
 		}
 
 		// 在事务中完成：更新订单状态 + 入账商户余额（保证原子性）
 		txErr := model.GetDB().Transaction(func(tx *gorm.DB) error {
+			if err := tx.Create(&txLog).Error; err != nil {
+				return err
+			}
 			// 使用 WHERE 条件确保只更新待支付的订单
 			result := tx.Model(order).
-				Where("status = ?", model.OrderStatusPending).
+				Where("status = ?", previousStatus).
 				Updates(updates)
 
 			if result.Error != nil {
@@ -802,25 +829,16 @@ func (s *BlockchainService) processTransfer(transfer Transfer) {
 			}
 
 			// 更新交易日志
-			tx.Model(&txLog).Updates(map[string]interface{}{
+			if err := tx.Model(&txLog).Updates(map[string]interface{}{
 				"matched":  true,
 				"order_id": order.ID,
-			})
+			}).Error; err != nil {
+				return err
+			}
 
 			// 增加商户余额（在同一事务内，保证与订单状态更新的原子性）
-			realAmount := order.SettlementAmount.Sub(order.Fee)
-			if order.FeeType == model.FeeTypeBalance {
-				if err := tx.Model(&model.Merchant{}).Where("id = ?", order.MerchantID).Updates(map[string]interface{}{
-					"balance":        gorm.Expr("balance + ?", realAmount.String()),
-					"frozen_balance": gorm.Expr("frozen_balance - ?", order.Fee.String()),
-				}).Error; err != nil {
-					return err
-				}
-			} else {
-				if err := tx.Model(&model.Merchant{}).Where("id = ?", order.MerchantID).
-					Update("balance", gorm.Expr("balance + ?", realAmount.String())).Error; err != nil {
-					return err
-				}
+			if err := creditOrderSettlement(tx, order, previousStatus == model.OrderStatusPending); err != nil {
+				return err
 			}
 
 			return nil
@@ -832,7 +850,7 @@ func (s *BlockchainService) processTransfer(transfer Transfer) {
 			} else {
 				log.Printf("Failed to process order %s: %v", order.TradeNo, txErr)
 			}
-			return
+			return txErr
 		}
 
 		// 使订单缓存失效
@@ -847,16 +865,26 @@ func (s *BlockchainService) processTransfer(transfer Transfer) {
 		model.GetDB().First(order, order.ID)
 
 		// 触发回调通知
-		go GetNotifyService().NotifyOrder(order.ID)
+		if order.NotifyURL != "" {
+			go GetNotifyService().NotifyOrder(order.ID)
+		}
 
 		// 发送Telegram通知 - 订单支付成功
-		go GetTelegramService().NotifyOrderPaid(order)
+		if GetTelegramService().IsEnabled() {
+			go GetTelegramService().NotifyOrderPaid(order)
+		}
+		return nil
 	}
+	return model.GetDB().Create(&txLog).Error
 }
 
 // matchOrder 匹配订单
 func (s *BlockchainService) matchOrder(transfer Transfer) *model.Order {
-	var order model.Order
+	order, _ := s.matchOrderResult(transfer)
+	return order
+}
+
+func (s *BlockchainService) matchOrderResult(transfer Transfer) (*model.Order, error) {
 
 	// 确定链的标准精度并截断金额
 	// TRC20/ERC20等: 6位小数
@@ -883,35 +911,33 @@ func (s *BlockchainService) matchOrder(transfer Transfer) *model.Order {
 	if transfer.Chain != "trc20" && transfer.Chain != "trx" {
 		toAddr = strings.ToLower(transfer.To)
 	}
-
-	err := model.GetDB().
-		Where("chain = ? AND to_address = ? AND unique_amount = ? AND status = ? AND expired_at > ?",
-			transfer.Chain,
-			toAddr,
-			normalizedAmount,
-			model.OrderStatusPending,
-			expiredTolerance).
-		Order("created_at ASC").
-		First(&order).Error
-
-	if err != nil {
-		// 兼容旧订单：尝试匹配 usdt_amount (旧字段)
-		err = model.GetDB().
-			Where("chain = ? AND to_address = ? AND usdt_amount = ? AND status = ? AND expired_at > ?",
-				transfer.Chain,
-				toAddr,
-				normalizedAmount,
-				model.OrderStatusPending,
-				expiredTolerance).
-			Order("created_at ASC").
-			First(&order).Error
-
-		if err != nil {
-			return nil
-		}
+	receivedAt := transfer.Timestamp
+	if receivedAt.IsZero() {
+		receivedAt = time.Now()
+	}
+	if receivedAt.After(time.Now().Add(time.Minute)) {
+		return nil, nil
 	}
 
-	return &order
+	query := model.GetDB().Where("chain = ? AND status IN (?,?) AND created_at <= ? AND expired_at >= ?", transfer.Chain, model.OrderStatusPending, model.OrderStatusExpired, receivedAt, receivedAt).
+		Where("channel = 'local' OR channel = '' OR channel IS NULL").
+		Where("unique_amount = ? OR ((unique_amount IS NULL OR unique_amount = 0) AND usdt_amount = ?)", normalizedAmount, normalizedAmount)
+	if transfer.Timestamp.IsZero() {
+		query = query.Where("expired_at > ?", expiredTolerance)
+	}
+	if !model.IsSQLite() && (transfer.Chain == "trx" || transfer.Chain == "trc20") {
+		query = query.Where("BINARY to_address = ?", toAddr)
+	} else {
+		query = query.Where("to_address = ?", toAddr)
+	}
+	var orders []model.Order
+	if err := query.Limit(2).Find(&orders).Error; err != nil {
+		return nil, err
+	}
+	if len(orders) != 1 {
+		return nil, nil
+	}
+	return &orders[0], nil
 }
 
 // GetListenerStatus 获取监听器状态
@@ -1286,15 +1312,22 @@ func (s *BlockchainService) detectReorg(listener *ChainListener, currentBlock ui
 
 	lastBlock := listener.blockHistory[len(listener.blockHistory)-1]
 
-	// 如果当前区块小于或等于最后记录的区块，可能发生重组
-	if currentBlock <= lastBlock {
-		log.Printf("[%s] Potential reorg detected: current=%d, last=%d", 
+	if currentBlock == lastBlock {
+		return false
+	}
+	// An unchanged head is normal when polling faster than block production.
+	if currentBlock < lastBlock {
+		log.Printf("[%s] Potential reorg detected: current=%d, last=%d",
 			listener.chain, currentBlock, lastBlock)
-		
+
 		// 清空历史，重新扫描
 		listener.blockHistory = []uint64{currentBlock}
-		if currentBlock > uint64(listener.reorgDepth) {
-			listener.lastBlock = currentBlock - uint64(listener.reorgDepth)
+		depth := listener.reorgDepth
+		if depth < 1 {
+			depth = 100
+		}
+		if currentBlock > uint64(depth) {
+			listener.lastBlock = currentBlock - uint64(depth)
 		} else {
 			listener.lastBlock = 0
 		}

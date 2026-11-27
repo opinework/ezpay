@@ -349,6 +349,11 @@
 
             {{if or (eq .order.Chain "wechat") (eq .order.Chain "alipay")}}
             <!-- 微信/支付宝收款码 -->
+            {{if and .isOfficial .order.ChannelPayURL}}
+            <div class="fiat-notice">
+                <a href="{{.order.ChannelPayURL}}" class="copy-btn" rel="noreferrer">前往{{if eq .order.Chain "wechat"}}微信{{else}}支付宝{{end}}付款</a>
+            </div>
+            {{else}}
             <div class="fiat-notice">
                 <p id="scanNotice">请使用{{if eq .order.Chain "wechat"}}微信{{else}}支付宝{{end}}扫码支付</p>
                 <p class="amount-highlight">¥{{.order.UniqueAmount}}</p>
@@ -356,6 +361,7 @@
             <div class="qrcode-container">
                 <div class="qrcode" id="qrcode"></div>
             </div>
+            {{end}}
             {{else}}
             <!-- USDT 二维码 -->
             <div class="qrcode-container">
@@ -395,6 +401,7 @@
                 <span data-i18n="cashier.waitingPayment">正在等待支付...</span>
             </div>
 
+            {{if not .isOfficial}}
             <div class="tips {{.order.Chain}}">
                 <h3 data-i18n="cashier.paymentTips">支付须知</h3>
                 <ul id="tipsList">
@@ -420,6 +427,7 @@
                     <li data-i18n="cashier.tips.dontClose">请勿关闭此页面，支付成功将自动跳转</li>
                 </ul>
             </div>
+            {{end}}
         </div>
 
         <div class="content" id="paidContent" style="display: none;">
@@ -441,7 +449,7 @@
     <script src="/static/js/i18n.js"></script>
     <script>
         const tradeNo = '{{.order.TradeNo}}';
-        const address = '{{.order.ToAddress}}';
+        const address = {{if .isOfficial}}{{.order.QRCode}}{{else}}{{.order.ToAddress}}{{end}};
         const chain = '{{.order.Chain}}';
         const isFiat = chain === 'wechat' || chain === 'alipay';
 

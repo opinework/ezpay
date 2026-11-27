@@ -77,6 +77,18 @@
         .trend-period { background: #f3f4f6; color: #374151; border: none; }
         .trend-period.active { background: #667eea; color: white; }
         .trend-period:hover { opacity: 0.9; }
+        #officialPaymentSettings textarea { padding:12px; border:1px solid #ddd; border-radius:8px; font-size:14px; }
+        #officialPaymentSettings textarea:focus { outline:none; border-color:#667eea; }
+        @media (max-width: 640px) {
+            .app-container:has(#page-settings.active) .sidebar { position:relative; width:100%; height:auto; }
+            .app-container:has(#page-settings.active) .sidebar-header { padding:12px 16px; }
+            .app-container:has(#page-settings.active) .sidebar-menu { display:flex; overflow-x:auto; padding:0; }
+            .app-container:has(#page-settings.active) .menu-item { flex-shrink:0; padding:12px; }
+            .main-content:has(#page-settings.active) { margin-left:0; padding:12px; }
+            .main-content:has(#page-settings.active) .header { flex-wrap:wrap; gap:12px; }
+            #page-settings .form-row { grid-template-columns:minmax(0,1fr); }
+            #page-settings .form-group { min-width:0; }
+        }
     </style>
 </head>
 <body>
@@ -481,6 +493,9 @@
                                 <small style="color:#666;font-size:12px;" data-i18n="adminPage.settings.personalWalletFeeRateDesc">使用个人钱包收款时的手续费率，收款直接到商户账户，手续费从余额扣除</small>
                             </div>
                         </div>
+
+                        <h3 style="margin-top:24px;margin-bottom:16px;">官方支付</h3>
+                        <div id="officialPaymentSettings"></div>
 
                         <h3 style="margin-top:24px;margin-bottom:16px;color:#333;border-bottom:1px solid #eee;padding-bottom:8px;" data-i18n="adminPage.settings.telegramBotSettings">Telegram 机器人设置</h3>
                         <div class="form-row">
@@ -1745,10 +1760,72 @@
             }
         }
 
+        const officialSettingFields = [
+            ['site_url', '站点 HTTPS 地址'],
+            ['payment_channel_alipay', '支付宝默认通道', [['', '沿用全局默认'], ['local', '本地收款码'], ['vmq', 'V免签'], ['epay', '易支付上游'], ['alipay_official', '支付宝官方']]],
+            ['payment_channel_wechat', '微信默认通道', [['', '沿用全局默认'], ['local', '本地收款码'], ['vmq', 'V免签'], ['epay', '易支付上游'], ['wechat_official', '微信官方']]],
+            ['channel_alipay_official_enabled', '启用支付宝官方', 'toggle'],
+            ['channel_alipay_official_mode', '支付宝产品', [['f2f', '当面付扫码'], ['page', '电脑网站支付'], ['wap', '手机网站支付']]],
+            ['channel_alipay_official_app_id', '支付宝应用 APPID'],
+            ['channel_alipay_official_merchant_id', '支付宝收款商户 PID'],
+            ['channel_alipay_official_private_key', '支付宝应用私钥', 'secret-pem'],
+            ['channel_alipay_official_public_key', '支付宝公钥', 'pem'],
+            ['channel_wechat_official_enabled', '启用微信官方', 'toggle'],
+            ['channel_wechat_official_mode', '微信产品', [['native', 'Native 扫码'], ['h5', 'H5 支付']]],
+            ['channel_wechat_official_app_id', '微信 APPID'],
+            ['channel_wechat_official_merchant_id', '微信商户号 MCHID'],
+            ['channel_wechat_official_serial_no', '微信商户证书序列号'],
+            ['channel_wechat_official_api_v3_key', '微信 API v3 密钥', 'secret'],
+            ['channel_wechat_official_private_key', '微信商户私钥 PEM', 'secret-pem'],
+            ['channel_wechat_official_public_key_id', '微信支付公钥 ID'],
+            ['channel_wechat_official_public_key', '微信支付公钥 PEM', 'pem'],
+            ['channel_wechat_official_platform_cert', '微信支付平台证书 PEM（证书模式）', 'pem']
+        ];
+
+        function renderOfficialSettings() {
+            const host = document.getElementById('officialPaymentSettings');
+            if (host.children.length) return;
+            for (const [key, title, kind] of officialSettingFields) {
+                const group = document.createElement('div');
+                group.className = 'form-group';
+                group.style.minWidth = '0';
+                const label = document.createElement('label');
+                label.htmlFor = 'cfg_' + key;
+                label.textContent = title;
+                let input;
+                if (Array.isArray(kind)) {
+                    input = document.createElement('select');
+                    for (const [value, text] of kind) input.add(new Option(text, value));
+                } else if (kind === 'pem' || kind === 'secret-pem') {
+                    input = document.createElement('textarea');
+                    input.rows = 4;
+                    input.style.cssText = 'width:100%;max-width:100%;box-sizing:border-box;resize:vertical;font-family:monospace;';
+                    if (kind === 'secret-pem') input.style.webkitTextSecurity = 'disc';
+                    input.spellcheck = false;
+                } else {
+                    input = document.createElement('input');
+                    input.type = kind === 'toggle' ? 'checkbox' : kind === 'secret' ? 'password' : 'text';
+                    if (kind === 'toggle') input.style.width = 'auto';
+                }
+                input.id = 'cfg_' + key;
+                input.autocomplete = 'off';
+                group.append(label, input);
+                host.append(group);
+            }
+        }
+
         async function loadSettings() {
+            renderOfficialSettings();
             const data = await api('/admin/api/configs');
             if (data.code === 1) {
-                document.getElementById('cfg_rate_mode').value = data.data.rate_mode || 'hybrid';
+                for (const [key, , kind] of officialSettingFields) {
+                    const input = document.getElementById('cfg_' + key);
+                    if (kind === 'toggle') input.checked = data.data[key] === '1';
+                    else input.value = data.data[key] || (Array.isArray(kind) ? kind[0][0] : '');
+                    if (kind === 'secret' || kind === 'secret-pem') input.placeholder = data.data[key + '_configured'] === '1' ? '已配置，留空保留' : '未配置';
+                }
+                const rateMode = document.getElementById('cfg_rate_mode');
+                if (rateMode) rateMode.value = data.data.rate_mode || 'hybrid';
                 document.getElementById('cfg_order_expire').value = data.data.order_expire || '30';
                 document.getElementById('cfg_notify_retry').value = data.data.notify_retry || '5';
                 document.getElementById('cfg_system_wallet_fee_rate').value = data.data.system_wallet_fee_rate || '0.02';
@@ -1768,7 +1845,6 @@
 
         async function saveSettings() {
             const settings = {
-                rate_mode: document.getElementById('cfg_rate_mode').value,
                 order_expire: document.getElementById('cfg_order_expire').value,
                 notify_retry: document.getElementById('cfg_notify_retry').value,
                 system_wallet_fee_rate: document.getElementById('cfg_system_wallet_fee_rate').value,
@@ -1782,12 +1858,19 @@
                 service_telegram: document.getElementById('cfg_service_telegram').value,
                 service_discord: document.getElementById('cfg_service_discord').value
             };
+            for (const [key, , kind] of officialSettingFields) {
+                const input = document.getElementById('cfg_' + key);
+                settings[key] = kind === 'toggle' ? (input.checked ? '1' : '0') : input.value.trim();
+            }
+            const rateMode = document.getElementById('cfg_rate_mode');
+            if (rateMode) settings.rate_mode = rateMode.value;
             const data = await api('/admin/api/configs', {
                 method: 'POST',
                 body: JSON.stringify(settings)
             });
             if (data.code === 1) {
                 showToast('保存成功');
+                loadSettings();
             } else {
                 showToast(data.msg || '保存失败', 'error');
             }

@@ -78,7 +78,7 @@ makechrootpkg -c -r ~/chroot
 # Debian/Ubuntu
 sudo apt install build-essential devscripts debhelper golang-go
 
-# 确保 Go 版本 >= 1.21
+# 确保 Go 版本 >= 1.26.11
 go version
 ```
 

@@ -64,6 +64,10 @@ func (h *CashierHandler) ShowCashier(c *gin.Context) {
 		return
 	}
 
+	if service.IsOfficialChannel(order.Channel) && order.QRCode == "" && order.ChannelPayURL == "" {
+		c.HTML(http.StatusOK, "error.html", gin.H{"title": "支付尚未就绪", "msg": "官方支付下单尚未完成，请返回商户重新发起同一订单"})
+		return
+	}
 	// 获取订单过期时间配置
 	expireMinutes := 30 // 默认30分钟
 	var config model.SystemConfig
@@ -78,6 +82,7 @@ func (h *CashierHandler) ShowCashier(c *gin.Context) {
 		"order":         order,
 		"expireMinutes": expireMinutes,
 		"expiredAt":     order.ExpiredAt.UnixMilli(),
+		"isOfficial":    service.IsOfficialChannel(order.Channel),
 	})
 }
 

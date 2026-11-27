@@ -34,7 +34,7 @@ type ServerConfig struct {
 }
 
 type DatabaseConfig struct {
-	Driver          string `mapstructure:"driver"`             // 数据库驱动: "mysql" (默认) 或 "sqlite"
+	Driver          string `mapstructure:"driver"` // 数据库驱动: "mysql" (默认) 或 "sqlite"
 	Host            string `mapstructure:"host"`
 	Port            int    `mapstructure:"port"`
 	User            string `mapstructure:"user"`
@@ -52,6 +52,7 @@ type JWTConfig struct {
 
 // SecurityConfig 安全配置
 type SecurityConfig struct {
+	TrustedProxies []string `mapstructure:"trusted_proxies"`
 	// 限流配置
 	RateLimitAPI      float64 `mapstructure:"rate_limit_api"`       // API每秒请求数
 	RateLimitAPIBurst int     `mapstructure:"rate_limit_api_burst"` // API突发容量
@@ -74,16 +75,16 @@ type NotifyConfig struct {
 
 // OrderConfig 订单配置
 type OrderConfig struct {
-	ExpireMinutes   int `mapstructure:"expire_minutes"`   // 订单过期时间(分钟)
-	CleanupHours    int `mapstructure:"cleanup_hours"`    // 自动清理多少小时前的无效订单
-	WalletCacheTTL  int `mapstructure:"wallet_cache_ttl"` // 钱包缓存时间(秒)
+	ExpireMinutes  int `mapstructure:"expire_minutes"`   // 订单过期时间(分钟)
+	CleanupHours   int `mapstructure:"cleanup_hours"`    // 自动清理多少小时前的无效订单
+	WalletCacheTTL int `mapstructure:"wallet_cache_ttl"` // 钱包缓存时间(秒)
 }
 
 // LogConfig 日志配置
 type LogConfig struct {
-	Level       string `mapstructure:"level"`        // 日志级别: debug, info, warn, error
-	DBLogLevel  string `mapstructure:"db_log_level"` // 数据库日志级别
-	APILogDays  int    `mapstructure:"api_log_days"` // API日志保留天数
+	Level      string `mapstructure:"level"`        // 日志级别: debug, info, warn, error
+	DBLogLevel string `mapstructure:"db_log_level"` // 数据库日志级别
+	APILogDays int    `mapstructure:"api_log_days"` // API日志保留天数
 }
 
 type BlockchainConfig struct {
@@ -99,17 +100,17 @@ type BlockchainConfig struct {
 }
 
 type ChainConfig struct {
-	Enabled         bool   `mapstructure:"enabled"`
-	RPC             string `mapstructure:"rpc"`
-	RPCBackups      []string `mapstructure:"rpc_backups"`       // 备用RPC节点列表
-	APIKey          string `mapstructure:"api_key"`             // 商业节点API Key（附加到RPC URL）
-	ContractAddress string `mapstructure:"contract_address"`
-	Confirmations   int    `mapstructure:"confirmations"`
-	ScanInterval    int    `mapstructure:"scan_interval"`
-	MaxBlockRange   int    `mapstructure:"max_block_range"`     // 单次查询最大区块范围（0=使用默认值）
-	MaxBatchSize    int    `mapstructure:"max_batch_size"`      // 批量请求最大数量（0=使用默认值，1=不使用批量）
-	BatchDelay      int    `mapstructure:"batch_delay_ms"`      // 批次间延迟毫秒（0=使用默认值）
-	RateLimit       float64 `mapstructure:"rate_limit"`         // 每秒最大请求数（0=使用默认值）
+	Enabled         bool     `mapstructure:"enabled"`
+	RPC             string   `mapstructure:"rpc"`
+	RPCBackups      []string `mapstructure:"rpc_backups"` // 备用RPC节点列表
+	APIKey          string   `mapstructure:"api_key"`     // 商业节点API Key（附加到RPC URL）
+	ContractAddress string   `mapstructure:"contract_address"`
+	Confirmations   int      `mapstructure:"confirmations"`
+	ScanInterval    int      `mapstructure:"scan_interval"`
+	MaxBlockRange   int      `mapstructure:"max_block_range"` // 单次查询最大区块范围（0=使用默认值）
+	MaxBatchSize    int      `mapstructure:"max_batch_size"`  // 批量请求最大数量（0=使用默认值，1=不使用批量）
+	BatchDelay      int      `mapstructure:"batch_delay_ms"`  // 批次间延迟毫秒（0=使用默认值）
+	RateLimit       float64  `mapstructure:"rate_limit"`      // 每秒最大请求数（0=使用默认值）
 }
 
 type RateConfig struct {
@@ -141,10 +142,10 @@ func Load() (*Config, error) {
 	exeDir := getExeDir()
 
 	// 按优先级添加配置路径
-	viper.AddConfigPath(exeDir)        // 可执行文件所在目录 (开发/部署环境)
-	viper.AddConfigPath(".")           // 当前工作目录
-	viper.AddConfigPath("./config")    // 当前目录下的config目录
-	viper.AddConfigPath("/etc/ezpay")  // 系统配置目录 (生产环境)
+	viper.AddConfigPath(exeDir)       // 可执行文件所在目录 (开发/部署环境)
+	viper.AddConfigPath(".")          // 当前工作目录
+	viper.AddConfigPath("./config")   // 当前目录下的config目录
+	viper.AddConfigPath("/etc/ezpay") // 系统配置目录 (生产环境)
 
 	// 设置默认值
 	setDefaults()
@@ -195,6 +196,7 @@ func getDefaultDataDir() string {
 }
 
 func setDefaults() {
+	viper.SetDefault("security.trusted_proxies", []string{"127.0.0.1/32", "::1/128"})
 	// Server
 	viper.SetDefault("server.host", "0.0.0.0")
 	viper.SetDefault("server.port", 6088)

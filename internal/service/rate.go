@@ -20,12 +20,12 @@ import (
 
 // RateService 汇率服务
 type RateService struct {
-	mu             sync.RWMutex
-	cachedRate     decimal.Decimal
-	cachedTRXRate  decimal.Decimal
-	lastUpdate     time.Time
-	lastTRXUpdate  time.Time
-	cacheSeconds   int
+	mu            sync.RWMutex
+	cachedRate    decimal.Decimal
+	cachedTRXRate decimal.Decimal
+	lastUpdate    time.Time
+	lastTRXUpdate time.Time
+	cacheSeconds  int
 }
 
 var rateService *RateService
@@ -383,14 +383,23 @@ func (s *RateService) GenerateUniqueAmountWithTx(tx *gorm.DB, baseAmount decimal
 	isFiat := chain == "wechat" || chain == "alipay"
 
 	// 查找该链上待支付订单的唯一金额（在事务中使用行锁防止并发生成相同金额）
+	lock := model.AmountLock{Chain: chain}
+	if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&lock).Error; err != nil {
+		return decimal.Zero
+	}
+	lockQuery := tx.Where("chain = ?", chain)
+	if tx.Dialector.Name() != "sqlite" {
+		lockQuery = lockQuery.Clauses(clause.Locking{Strength: "UPDATE"})
+	}
+	if err := lockQuery.First(&lock).Error; err != nil {
+		return decimal.Zero
+	}
 	var existingAmounts []string
-	lockClause := clause.Locking{Strength: "UPDATE"}
 	query := tx.Model(&model.Order{}).
 		Where("chain = ? AND status = ?", chain, model.OrderStatusPending)
-	if !model.IsSQLite() {
-		query = query.Clauses(lockClause)
+	if err := query.Pluck("CASE WHEN unique_amount IS NULL OR unique_amount = 0 THEN usdt_amount ELSE unique_amount END", &existingAmounts).Error; err != nil {
+		return decimal.Zero
 	}
-	query.Pluck("unique_amount", &existingAmounts)
 
 	existingMap := make(map[string]bool)
 	for _, amt := range existingAmounts {
@@ -429,9 +438,7 @@ func (s *RateService) GenerateUniqueAmountWithTx(tx *gorm.DB, baseAmount decimal
 		}
 
 		// 最终兜底：使用更大的偏移范围
-		ts := time.Now().UnixNano() % 100000
-		offset := decimal.NewFromFloat(float64(ts) * 0.01)
-		return baseAmount.Add(offset).Round(2)
+		return decimal.Zero
 	}
 
 	// 加密货币: 使用 0.000001 递增偏移
@@ -461,9 +468,7 @@ func (s *RateService) GenerateUniqueAmountWithTx(tx *gorm.DB, baseAmount decimal
 	}
 
 	// 最终兜底：使用更大的偏移范围
-	ts := time.Now().UnixNano() % 10000000
-	offset := decimal.NewFromFloat(float64(ts) * 0.000001)
-	return baseAmount.Add(offset).Round(6)
+	return decimal.Zero
 }
 
 // ParseDecimal 安全解析decimal

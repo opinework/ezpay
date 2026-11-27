@@ -86,13 +86,12 @@ check_command "go" "Go 编译器" "请访问 https://golang.org/dl/"
 
 if command -v go &> /dev/null; then
     GO_VERSION=$(go version | awk '{print $3}' | sed 's/go//')
-    GO_MAJOR=$(echo $GO_VERSION | cut -d. -f1)
-    GO_MINOR=$(echo $GO_VERSION | cut -d. -f2)
-
-    if [ "$GO_MAJOR" -ge 1 ] && [ "$GO_MINOR" -ge 21 ]; then
-        echo -e "  ${GREEN}Go 版本满足要求 (>= 1.21)${NC}"
+    if [[ "$GO_VERSION" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]] &&
+       (( BASH_REMATCH[1] > 1 || (BASH_REMATCH[1] == 1 && BASH_REMATCH[2] > 26) ||
+          (BASH_REMATCH[1] == 1 && BASH_REMATCH[2] == 26 && BASH_REMATCH[3] >= 11) )); then
+        echo -e "  ${GREEN}Go 版本满足要求 (>= 1.26.11)${NC}"
     else
-        echo -e "  ${RED}Go 版本过低，需要 >= 1.21${NC}"
+        echo -e "  ${RED}Go 版本过低，需要 >= 1.26.11${NC}"
         ((ERRORS++))
     fi
 fi

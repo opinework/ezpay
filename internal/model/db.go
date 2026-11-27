@@ -10,6 +10,7 @@ import (
 	"github.com/glebarez/sqlite"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 	"gorm.io/gorm/logger"
 )
 
@@ -148,6 +149,10 @@ func autoMigrate() error {
 		&ExchangeRate{},
 		&ExchangeRateHistory{},
 		&BlockScanProgress{},
+		&MonitorEvent{},
+		&OfficialPayment{},
+		&UpstreamPayment{},
+		&AmountLock{},
 	}
 
 	// 逐个迁移，跳过非致命错误（如 Error 1091: 索引/外键不存在）
@@ -168,7 +173,35 @@ func autoMigrate() error {
 	// 用途：GORM AutoMigrate 在历史库升级场景偶发漏检（不同版本/字符集/列顺序差异），
 	//      新加的字段可能没成功 ALTER 上去。这里按列清单逐一兜底，确保上线后没有 "Unknown column" 错误。
 	// 维护：每次给某个 model 加一个新字段，都应在下方追加一条对应的兜底记录。
-	ensureRequiredColumns()
+	if err := ensureRequiredColumns(); err != nil {
+		return err
+	}
+	if DB.Migrator().HasIndex(&TransactionLog{}, "idx_transaction_logs_tx_hash") {
+		if err := DB.Migrator().DropIndex(&TransactionLog{}, "idx_transaction_logs_tx_hash"); err != nil {
+			return err
+		}
+	}
+	for _, required := range []struct {
+		model interface{}
+		index string
+	}{
+		{&Order{}, "idx_orders_merchant_request"}, {&Order{}, "idx_orders_trade_no"},
+		{&OfficialPayment{}, "idx_official_transaction"}, {&OfficialPayment{}, "idx_official_payments_order_id"},
+		{&UpstreamPayment{}, "idx_upstream_transaction"}, {&UpstreamPayment{}, "idx_upstream_payments_order_id"},
+		{&MonitorEvent{}, "idx_monitor_merchant_event"}, {&TransactionLog{}, "idx_transaction_logs_chain_event"},
+	} {
+		if !DB.Migrator().HasIndex(required.model, required.index) {
+			if err := DB.Migrator().CreateIndex(required.model, required.index); err != nil {
+				return fmt.Errorf("required payment index %s: %w", required.index, err)
+			}
+		}
+	}
+	// Populate locks before accepting traffic, avoiding competing first-use inserts.
+	for _, chain := range []string{"wechat", "alipay", "trc20", "trx", "erc20", "bep20", "polygon", "optimism", "arbitrum", "avalanche", "base"} {
+		if err := DB.Clauses(clause.OnConflict{DoNothing: true}).Create(&AmountLock{Chain: chain}).Error; err != nil {
+			return err
+		}
+	}
 
 	return nil
 }
@@ -197,22 +230,40 @@ type requiredColumn struct {
 //  4. 在新装库上启动一次，AutoMigrate 会建表，columnExists 返回 true，catalog 静默通过
 //
 // DDL 撰写要点：
-//  - MySQL DDL 使用反引号包裹标识符；用 `AFTER existing_column` 控制列位置（可选）
-//  - SQLite 不支持 AFTER；类型用 VARCHAR/INT 等通用 SQL 类型
-//  - DEFAULT 值要与 GORM tag 中的 default 一致，避免新装库与升级库语义不一致
-//  - 不要在 DDL 里加 FK，避免与 DisableForeignKeyConstraintWhenMigrating 冲突
+//   - MySQL DDL 使用反引号包裹标识符；用 `AFTER existing_column` 控制列位置（可选）
+//   - SQLite 不支持 AFTER；类型用 VARCHAR/INT 等通用 SQL 类型
+//   - DEFAULT 值要与 GORM tag 中的 default 一致，避免新装库与升级库语义不一致
+//   - 不要在 DDL 里加 FK，避免与 DisableForeignKeyConstraintWhenMigrating 冲突
 var requiredColumnsCatalog = []requiredColumn{
+	{Table: "transaction_logs", Column: "event_id", MySQLDDL: "ALTER TABLE `transaction_logs` ADD COLUMN `event_id` VARCHAR(160)", SQLiteDDL: "ALTER TABLE transaction_logs ADD COLUMN event_id VARCHAR(160)"},
+	{Table: "orders", Column: "notify_lease_until", MySQLDDL: "ALTER TABLE `orders` ADD COLUMN `notify_lease_until` DATETIME(3)", SQLiteDDL: "ALTER TABLE orders ADD COLUMN notify_lease_until DATETIME"},
+	{Table: "orders", Column: "provider_checked_at", MySQLDDL: "ALTER TABLE `orders` ADD COLUMN `provider_checked_at` DATETIME(3)", SQLiteDDL: "ALTER TABLE orders ADD COLUMN provider_checked_at DATETIME"},
 	{
 		Table:     "merchants",
 		Column:    "default_currency",
 		MySQLDDL:  "ALTER TABLE `merchants` ADD COLUMN `default_currency` VARCHAR(10) NOT NULL DEFAULT 'USD' AFTER `wallet_mode`",
 		SQLiteDDL: "ALTER TABLE merchants ADD COLUMN default_currency VARCHAR(10) NOT NULL DEFAULT 'USD'",
 	},
+	{
+		Table: "orders", Column: "payment_mode",
+		MySQLDDL:  "ALTER TABLE `orders` ADD COLUMN `payment_mode` VARCHAR(20)",
+		SQLiteDDL: "ALTER TABLE orders ADD COLUMN payment_mode VARCHAR(20)",
+	},
+	{
+		Table: "orders", Column: "official_app_id",
+		MySQLDDL:  "ALTER TABLE `orders` ADD COLUMN `official_app_id` VARCHAR(64)",
+		SQLiteDDL: "ALTER TABLE orders ADD COLUMN official_app_id VARCHAR(64)",
+	},
+	{
+		Table: "orders", Column: "official_merchant_id",
+		MySQLDDL:  "ALTER TABLE `orders` ADD COLUMN `official_merchant_id` VARCHAR(64)",
+		SQLiteDDL: "ALTER TABLE orders ADD COLUMN official_merchant_id VARCHAR(64)",
+	},
 	// ⬆ 添加新字段时，按此格式继续追加。空行可保留以便 git diff 清晰。
 }
 
 // ensureRequiredColumns 检查清单内的每一列是否存在，缺失则执行 ADD COLUMN
-func ensureRequiredColumns() {
+func ensureRequiredColumns() error {
 	for _, c := range requiredColumnsCatalog {
 		if columnExists(c.Table, c.Column) {
 			continue
@@ -223,12 +274,11 @@ func ensureRequiredColumns() {
 		}
 		log.Printf("Schema fix: column %s.%s missing, running ALTER", c.Table, c.Column)
 		if err := DB.Exec(ddl).Error; err != nil {
-			// 不 fatal —— 让服务继续启动以便排查；但后续操作会因列缺失继续报错
-			log.Printf("Schema fix FAILED for %s.%s: %v (manual ALTER needed)", c.Table, c.Column, err)
-			continue
+			return fmt.Errorf("schema fix %s.%s: %w", c.Table, c.Column, err)
 		}
 		log.Printf("Schema fix: column %s.%s added", c.Table, c.Column)
 	}
+	return nil
 }
 
 // columnExists 判断指定表是否含有指定列。MySQL 用 INFORMATION_SCHEMA，SQLite 用 PRAGMA。

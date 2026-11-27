@@ -2,9 +2,12 @@ package middleware
 
 import (
 	"bytes"
+	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -233,7 +236,7 @@ func AdminAuth(cfg *config.Config) gin.HandlerFunc {
 		// 验证Token
 		token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 			return []byte(cfg.JWT.Secret), nil
-		})
+		}, jwt.WithValidMethods([]string{"HS256"}), jwt.WithExpirationRequired())
 
 		if err != nil || !token.Valid {
 			c.JSON(http.StatusUnauthorized, gin.H{
@@ -281,6 +284,12 @@ func AdminAuth(cfg *config.Config) gin.HandlerFunc {
 				"code": -1,
 				"msg":  "Token信息不完整",
 			})
+			c.Abort()
+			return
+		}
+		var admin model.Admin
+		if err := model.GetDB().Where("id = ? AND username = ? AND status = 1", uint(adminIDVal), username).First(&admin).Error; err != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"code": -1, "msg": "管理员已停用或不存在"})
 			c.Abort()
 			return
 		}
@@ -376,7 +385,7 @@ func MerchantAuth(cfg *config.Config) gin.HandlerFunc {
 		// 验证Token
 		token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 			return []byte(cfg.JWT.Secret), nil
-		})
+		}, jwt.WithValidMethods([]string{"HS256"}), jwt.WithExpirationRequired())
 
 		if err != nil || !token.Valid {
 			c.JSON(http.StatusUnauthorized, gin.H{
@@ -587,7 +596,12 @@ func APILogger() gin.HandlerFunc {
 		// 读取请求体
 		var requestBody string
 		if c.Request.Body != nil {
-			bodyBytes, _ := io.ReadAll(c.Request.Body)
+			c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 1<<20)
+			bodyBytes, err := io.ReadAll(c.Request.Body)
+			if err != nil {
+				c.AbortWithStatusJSON(http.StatusRequestEntityTooLarge, gin.H{"code": -1, "msg": "请求体过大或无法读取"})
+				return
+			}
 			// 恢复请求体以供后续处理
 			c.Request.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
 			requestBody = string(bodyBytes)
@@ -661,17 +675,53 @@ func APILogger() gin.HandlerFunc {
 
 // maskSensitiveData 脱敏处理敏感数据
 func maskSensitiveData(data string) string {
-	// 简单的脱敏处理，替换sign和key参数的值
-	for _, key := range []string{"sign", "key", "password"} {
-		if idx := strings.Index(data, key+"="); idx >= 0 {
-			endIdx := strings.Index(data[idx:], "&")
-			if endIdx == -1 {
-				endIdx = len(data) - idx
+	secret := func(key string) bool {
+		key = strings.ToLower(key)
+		return key == "sign" || key == "key" || key == "password" || key == "token" || strings.HasSuffix(key, "_key") || strings.HasSuffix(key, "_token") || strings.HasSuffix(key, "_secret")
+	}
+	var value interface{}
+	if json.Unmarshal([]byte(data), &value) == nil {
+		var mask func(interface{})
+		mask = func(v interface{}) {
+			switch node := v.(type) {
+			case map[string]interface{}:
+				for k, item := range node {
+					if secret(k) {
+						node[k] = "***"
+					} else {
+						mask(item)
+					}
+				}
+			case []interface{}:
+				for _, item := range node {
+					mask(item)
+				}
 			}
-			data = data[:idx] + key + "=***" + data[idx+endIdx:]
+		}
+		mask(value)
+		encoded, _ := json.Marshal(value)
+		return string(encoded)
+	}
+	values, err := url.ParseQuery(data)
+	if err != nil {
+		return "[unparseable request redacted]"
+	}
+	for key := range values {
+		if secret(key) {
+			values[key] = []string{"***"}
 		}
 	}
-	return data
+	return values.Encode()
+}
+
+func RequestLogger() gin.HandlerFunc {
+	return gin.LoggerWithFormatter(func(p gin.LogFormatterParams) string {
+		path := p.Request.URL.Path
+		if p.Request.URL.RawQuery != "" {
+			path += "?" + maskSensitiveData(p.Request.URL.RawQuery)
+		}
+		return fmt.Sprintf("[HTTP] %s %s %d %s\n", p.Method, path, p.StatusCode, p.Latency)
+	})
 }
 
 // truncateString 截断字符串

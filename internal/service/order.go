@@ -1,13 +1,16 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"log"
 	"net/url"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"ezpay/internal/model"
 	"ezpay/internal/util"
@@ -54,6 +57,12 @@ func getSiteURL() string {
 // 加密货币：返回 siteURL/qrcode?text=<address> 由 /qrcode 端点动态生成 PNG
 // siteURL 为空时返回相对路径，仍可工作但需要前端在同域访问
 func buildQRCodeURL(order *model.Order, isFiat bool, siteURL string) string {
+	if IsOfficialChannel(order.Channel) {
+		if order.QRCode == "" {
+			return ""
+		}
+		return siteURL + "/qrcode?text=" + url.QueryEscape(order.QRCode)
+	}
 	if isFiat {
 		// 法币订单的 order.QRCode 是商户上传图片的相对路径，如 "/static/qrcode/abc.png"
 		path := order.QRCode
@@ -123,6 +132,14 @@ type CreateOrderResponse struct {
 
 // CreateOrder 创建订单
 func (s *OrderService) CreateOrder(req *CreateOrderRequest) (*CreateOrderResponse, error) {
+	if req == nil || strings.TrimSpace(req.OutTradeNo) == "" || utf8.RuneCountInString(req.OutTradeNo) > 64 || utf8.RuneCountInString(req.Name) > 200 {
+		return nil, errors.New("订单号或商品名称无效")
+	}
+	for _, raw := range []string{req.NotifyURL, req.ReturnURL} {
+		if raw != "" && (len(raw) > 500 || mergePaymentQuery(raw, nil) == "") {
+			return nil, errors.New("回调或返回地址无效")
+		}
+	}
 	// 验证商户
 	var merchant model.Merchant
 	if err := model.GetDB().Where("p_id = ? AND status = 1", req.MerchantPID).First(&merchant).Error; err != nil {
@@ -130,7 +147,7 @@ func (s *OrderService) CreateOrder(req *CreateOrderRequest) (*CreateOrderRespons
 	}
 
 	// 验证金额
-	money, err := decimal.NewFromString(req.Money)
+	money, err := util.ParseAmount(req.Money)
 	if err != nil || money.LessThanOrEqual(decimal.Zero) {
 		return nil, errors.New("金额无效")
 	}
@@ -157,6 +174,9 @@ func (s *OrderService) CreateOrder(req *CreateOrderRequest) (*CreateOrderRespons
 	if !util.IsValidChain(chain) {
 		return nil, errors.New("不支持的支付类型")
 	}
+	if IsOfficialChannel(req.Channel) && !officialChannelMatches(req.Channel, chain) {
+		return nil, errors.New("官方通道与支付方式不匹配")
+	}
 
 	// 检查法币通道是否启用
 	if util.IsFiatChain(chain) {
@@ -170,12 +190,23 @@ func (s *OrderService) CreateOrder(req *CreateOrderRequest) (*CreateOrderRespons
 	var existingOrder model.Order
 	err = model.GetDB().Where("merchant_id = ? AND out_trade_no = ?", merchant.ID, req.OutTradeNo).First(&existingOrder).Error
 	if err == nil {
+		if !existingOrder.Money.Equal(money) || existingOrder.Currency != currency || existingOrder.Chain != chain {
+			return nil, errors.New("订单号已存在，金额、币种或支付方式不一致")
+		}
 		// 订单已存在
 		if existingOrder.Status == model.OrderStatusPending {
+			if existingOrder.Channel != "" && existingOrder.Channel != "local" && !officialPaymentReady(&existingOrder) {
+				if err := s.createUpstreamOrder(&existingOrder, existingOrder.Channel); err != nil {
+					return nil, err
+				}
+			}
 			// 返回已存在的待支付订单
 			return s.buildOrderResponse(&existingOrder, &merchant)
 		}
 		return nil, errors.New("订单号已存在")
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, errors.New("读取订单失败，请稍后重试")
 	}
 
 	// 确定使用的通道
@@ -271,6 +302,10 @@ func (s *OrderService) CreateOrder(req *CreateOrderRequest) (*CreateOrderRespons
 		}
 	}
 
+	if IsOfficialChannel(channel) && currency != "CNY" {
+		payAmount = payAmount.Round(2)
+	}
+
 	// 计算显示汇率（用于收银台显示）
 	// 显示格式: 1 {支付货币} ≈ {产品货币符号}X
 	// 例如：1 USDT ≈ $1（USD产品）、1 TRX ≈ €0.84（EUR产品）
@@ -361,9 +396,15 @@ func (s *OrderService) CreateOrder(req *CreateOrderRequest) (*CreateOrderRespons
 			// 在事务中生成唯一金额（防止并发生成相同金额）
 			if isFiat {
 				uniqueAmount := rateService.GenerateUniqueAmountWithTx(tx, payAmount, chain)
+				if !uniqueAmount.IsPositive() {
+					return errors.New("无法分配收款金额，请稍后重试")
+				}
 				order.UniqueAmount = uniqueAmount
 			} else {
 				uniqueAmount := rateService.GenerateUniqueAmountWithTx(tx, payAmount, chain)
+				if !uniqueAmount.IsPositive() {
+					return errors.New("无法分配收款金额，请稍后重试")
+				}
 				order.PayAmount = payAmount
 				order.UniqueAmount = uniqueAmount
 				order.USDTAmount = uniqueAmount
@@ -401,6 +442,11 @@ func (s *OrderService) CreateOrder(req *CreateOrderRequest) (*CreateOrderRespons
 		order.FeeRate = feeRate
 		order.FeeType = model.FeeTypeDeduction
 		order.Fee = settlementAmount.Mul(feeRate)
+		if IsOfficialChannel(channel) {
+			if err := prepareOfficialOrder(&order); err != nil {
+				return nil, err
+			}
+		}
 
 		if err := model.GetDB().Create(&order).Error; err != nil {
 			return nil, errors.New("订单创建失败")
@@ -408,64 +454,13 @@ func (s *OrderService) CreateOrder(req *CreateOrderRequest) (*CreateOrderRespons
 	}
 
 	// 发送Telegram通知 - 订单创建
-	go GetTelegramService().NotifyOrderCreated(&order)
+	createdOrder := order
+	go GetTelegramService().NotifyOrderCreated(&createdOrder)
 
 	// 如果使用上游通道，在这里创建上游订单
 	if channel != "local" {
 		if err := s.createUpstreamOrder(&order, channel); err != nil {
-			// 上游创建失败，回退到本地
-			fmt.Printf("Failed to create upstream order: %v, falling back to local\n", err)
-			order.Channel = "local"
-			// 回退到本地通道：使用正确的钱包选择和费率计算
-			wallet, useMerchantWallet, walletErr := s.selectWalletByMode(&merchant, chain)
-			if walletErr != nil {
-				return nil, errors.New("暂无可用的收款地址")
-			}
-			if chain == "trc20" || chain == "trx" {
-				order.ToAddress = wallet.Address
-			} else {
-				order.ToAddress = strings.ToLower(wallet.Address)
-			}
-			order.WalletID = wallet.ID
-
-			// 计算手续费
-			var feeRate decimal.Decimal
-			if useMerchantWallet {
-				feeRate = s.getPersonalWalletFeeRate()
-				order.FeeType = model.FeeTypeBalance
-			} else {
-				feeRate = s.getSystemWalletFeeRate()
-				order.FeeType = model.FeeTypeDeduction
-			}
-			order.FeeRate = feeRate
-			order.Fee = settlementAmount.Mul(feeRate)
-
-			// 在事务中生成唯一金额并预扣手续费
-			txErr := model.GetDB().Transaction(func(tx *gorm.DB) error {
-				uniqueAmount := rateService.GenerateUniqueAmountWithTx(tx, payAmount, chain)
-				order.PayAmount = payAmount
-				order.UniqueAmount = uniqueAmount
-				order.USDTAmount = uniqueAmount
-
-				// 商户钱包模式需要预扣手续费
-				if useMerchantWallet && order.Fee.GreaterThan(decimal.Zero) {
-					feeStr := order.Fee.StringFixed(6)
-					freezeResult := tx.Model(&model.Merchant{}).
-						Where("id = ? AND (balance - frozen_balance) >= ?", merchant.ID, feeStr).
-						Update("frozen_balance", gorm.Expr("frozen_balance + ?", feeStr))
-					if freezeResult.Error != nil {
-						return errors.New("扣除手续费失败")
-					}
-					if freezeResult.RowsAffected == 0 {
-						return errors.New("商户余额不足以支付手续费")
-					}
-				}
-
-				return tx.Save(&order).Error
-			})
-			if txErr != nil {
-				return nil, txErr
-			}
+			return nil, err
 		}
 	}
 
@@ -473,7 +468,21 @@ func (s *OrderService) CreateOrder(req *CreateOrderRequest) (*CreateOrderRespons
 }
 
 // determineChannel 确定使用的支付通道
+func (s *OrderService) PaymentChannel(chain string) string { return s.determineChannel("", chain) }
+
 func (s *OrderService) determineChannel(requestedChannel string, chain string) string {
+	if requestedChannel == "local" {
+		return "local"
+	}
+	if IsOfficialChannel(requestedChannel) {
+		return requestedChannel
+	}
+	if requestedChannel == "" && (chain == "wechat" || chain == "alipay") {
+		var preferred model.SystemConfig
+		if err := model.GetDB().Where("`key` = ?", "payment_channel_"+chain).First(&preferred).Error; err == nil && preferred.Value != "" {
+			return preferred.Value
+		}
+	}
 	// 如果明确指定了通道，尝试使用该通道
 	if requestedChannel != "" && requestedChannel != "local" {
 		channelService := GetChannelService()
@@ -486,6 +495,9 @@ func (s *OrderService) determineChannel(requestedChannel string, chain string) s
 	var config model.SystemConfig
 	if err := model.GetDB().Where("`key` = ?", "default_channel").First(&config).Error; err == nil {
 		if config.Value != "" && config.Value != "local" {
+			if IsOfficialChannel(config.Value) && !officialChannelMatches(config.Value, chain) {
+				return "local"
+			}
 			channelService := GetChannelService()
 			if _, err := channelService.GetChannelConfig(ChannelType(config.Value)); err == nil {
 				return config.Value
@@ -499,6 +511,19 @@ func (s *OrderService) determineChannel(requestedChannel string, chain string) s
 // createUpstreamOrder 在上游通道创建订单
 func (s *OrderService) createUpstreamOrder(order *model.Order, channel string) error {
 	channelService := GetChannelService()
+	if IsOfficialChannel(channel) {
+		result, err := channelService.CreateOfficialOrder(order)
+		if err != nil {
+			return err
+		}
+		// Callback may arrive during prepay; update payment presentation only, never overwrite status or balances.
+		if err := model.GetDB().Model(&model.Order{}).Where("id = ?", order.ID).Updates(map[string]interface{}{
+			"channel_pay_url": result.PayURL, "qr_code": result.QRCode,
+		}).Error; err != nil {
+			return err
+		}
+		return model.GetDB().First(order, order.ID).Error
+	}
 	cfg, err := channelService.GetChannelConfig(ChannelType(channel))
 	if err != nil {
 		return err
@@ -533,17 +558,18 @@ func (s *OrderService) createUpstreamOrder(order *model.Order, channel string) e
 	}
 
 	// 更新订单
-	order.ChannelOrderID = result.OrderID
-	order.ChannelPayURL = result.PayURL
-	order.PayAmount = result.Amount    // 设置展示金额
-	order.UniqueAmount = result.Amount // 设置标识金额（上游通道不需要偏移）
-	order.USDTAmount = result.Amount   // 兼容旧字段
-	if !result.ExpireTime.IsZero() {
-		order.ExpiredAt = result.ExpireTime
+	if result.PayURL == "" {
+		return errors.New("上游未返回有效支付地址")
 	}
-	// 注意：SettlementAmount 已经在订单创建时设置（第202行），这里无需修改
-
-	return model.GetDB().Save(order).Error
+	updates := map[string]interface{}{"channel_pay_url": result.PayURL, "channel_order_id": result.OrderID, "pay_amount": result.Amount, "unique_amount": result.Amount, "usdt_amount": result.Amount}
+	if !result.ExpireTime.IsZero() && result.ExpireTime.Before(order.ExpiredAt) {
+		updates["expired_at"] = result.ExpireTime
+	}
+	// A callback can commit while prepay is in flight; never save the stale full order.
+	if err := model.GetDB().Model(&model.Order{}).Where("id = ? AND status = ?", order.ID, model.OrderStatusPending).Updates(updates).Error; err != nil {
+		return err
+	}
+	return model.GetDB().First(order, order.ID).Error
 }
 
 // buildOrderResponse 构建订单响应
@@ -772,17 +798,16 @@ func (s *OrderService) ExpireOrders() {
 
 		for _, order := range orders {
 			// 更新订单状态
-			result := model.GetDB().Model(&model.Order{}).Where("id = ? AND status = ?", order.ID, model.OrderStatusPending).Update("status", model.OrderStatusExpired)
-			if result.RowsAffected == 0 {
+			changed, err := finishUnpaidOrder(model.GetDB(), order.ID, model.OrderStatusExpired)
+			if err != nil {
+				log.Printf("Expire order %s failed: %v", order.TradeNo, err)
+				return
+			}
+			if !changed {
 				continue // order was already paid or processed
 			}
 
-			// 退还预扣的手续费 (仅商户钱包模式)
-			if order.FeeType == model.FeeTypeBalance {
-				if err := GetWithdrawService().RefundPreChargedFeeDec(order.MerchantID, order.Fee); err != nil {
-					fmt.Printf("Failed to refund fee for expired order %s: %v\n", order.TradeNo, err)
-				}
-			}
+			s.InvalidateOrderCache(order.TradeNo)
 
 			// 发送Telegram通知 - 订单过期
 			go GetTelegramService().NotifyOrderExpired(&order)
@@ -816,7 +841,7 @@ func (s *OrderService) getOrderExpireMinutes() int {
 		return 30
 	}
 	minutes, err := strconv.Atoi(config.Value)
-	if err != nil {
+	if err != nil || minutes < 1 || minutes > 1440 {
 		return 30
 	}
 	return minutes
@@ -872,7 +897,7 @@ func (s *OrderService) getSystemWalletFeeRate() decimal.Decimal {
 		return decimal.NewFromFloat(0.02) // 默认2%
 	}
 	rate, err := decimal.NewFromString(config.Value)
-	if err != nil {
+	if err != nil || rate.IsNegative() || rate.GreaterThan(decimal.NewFromInt(1)) {
 		return decimal.NewFromFloat(0.02)
 	}
 	return rate
@@ -885,7 +910,7 @@ func (s *OrderService) getPersonalWalletFeeRate() decimal.Decimal {
 		return decimal.NewFromFloat(0.01) // 默认1%
 	}
 	rate, err := decimal.NewFromString(config.Value)
-	if err != nil {
+	if err != nil || rate.IsNegative() || rate.GreaterThan(decimal.NewFromInt(1)) {
 		return decimal.NewFromFloat(0.01)
 	}
 	return rate
@@ -897,22 +922,22 @@ func (s *OrderService) CancelOrder(tradeNo string) error {
 	if err := model.GetDB().Where("trade_no = ? AND status = ?", tradeNo, model.OrderStatusPending).First(&order).Error; err != nil {
 		return errors.New("订单不存在或无法取消")
 	}
+	if IsOfficialChannel(order.Channel) {
+		if err := CloseOfficialOrder(&order); err != nil {
+			return err
+		}
+	}
 
 	// 更新订单状态（使用乐观锁防止覆盖已支付订单）
-	result := model.GetDB().Model(&model.Order{}).Where("id = ? AND status = ?", order.ID, model.OrderStatusPending).Update("status", model.OrderStatusCancelled)
-	if result.Error != nil {
-		return result.Error
+	changed, err := finishUnpaidOrder(model.GetDB(), order.ID, model.OrderStatusCancelled)
+	if err != nil {
+		return err
 	}
-	if result.RowsAffected == 0 {
+	if !changed {
 		return errors.New("订单状态已变更，无法取消")
 	}
 
-	// 退还预扣的手续费 (仅商户钱包模式)
-	if order.FeeType == model.FeeTypeBalance {
-		if err := GetWithdrawService().RefundPreChargedFeeDec(order.MerchantID, order.Fee); err != nil {
-			return fmt.Errorf("退还手续费失败: %v", err)
-		}
-	}
+	s.InvalidateOrderCache(tradeNo)
 
 	return nil
 }
@@ -922,6 +947,21 @@ func (s *OrderService) MarkOrderPaid(tradeNo string, txHash string, amount decim
 	var order model.Order
 	if err := model.GetDB().Where("trade_no = ?", tradeNo).First(&order).Error; err != nil {
 		return errors.New("订单不存在")
+	}
+	if !amount.IsPositive() {
+		return errors.New("实际金额必须大于零")
+	}
+	if IsOfficialChannel(order.Channel) {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		receipt, err := QueryOfficialOrder(ctx, &order)
+		if err != nil {
+			return err
+		}
+		if receipt == nil {
+			return errors.New("官方尚未确认付款")
+		}
+		return CompleteOfficialReceipt(*receipt)
 	}
 
 	if order.Status != model.OrderStatusPending && order.Status != model.OrderStatusExpired {
@@ -936,6 +976,9 @@ func (s *OrderService) MarkOrderPaid(tradeNo string, txHash string, amount decim
 		"tx_hash":       txHash,
 		"actual_amount": amount,
 		"paid_at":       &now,
+	}
+	if order.NotifyURL != "" {
+		updates["notify_status"] = model.NotifyStatusFailed
 	}
 
 	// 在事务中完成：更新订单状态 + 入账商户余额（保证原子性）
@@ -952,19 +995,11 @@ func (s *OrderService) MarkOrderPaid(tradeNo string, txHash string, amount decim
 		}
 
 		// 入账商户余额（在同一事务内）
-		realAmount := order.SettlementAmount.Sub(order.Fee)
 
 		// FeeType=Balance + 原状态=Pending: 手续费仍处于冻结中，paid 时需要解冻
 		// FeeType=Balance + 原状态=Expired: ExpireOrders 已经把冻结退还了，这里不能再扣 frozen_balance（否则会负数 → 可用余额虚高）
 		// FeeType=Deduction: 手续费从收款扣除，没有冻结
-		if order.FeeType == model.FeeTypeBalance && prevStatus == model.OrderStatusPending {
-			return tx.Model(&model.Merchant{}).Where("id = ?", order.MerchantID).Updates(map[string]interface{}{
-				"balance":        gorm.Expr("balance + ?", realAmount.String()),
-				"frozen_balance": gorm.Expr("frozen_balance - ?", order.Fee.String()),
-			}).Error
-		}
-		return tx.Model(&model.Merchant{}).Where("id = ?", order.MerchantID).
-			Update("balance", gorm.Expr("balance + ?", realAmount.String())).Error
+		return creditOrderSettlement(tx, &order, prevStatus == model.OrderStatusPending)
 	})
 	if txErr != nil {
 		return txErr

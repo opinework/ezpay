@@ -1,6 +1,6 @@
 # EzPay
 
-多通道聚合收款平台，支持 USDT/TRX 加密货币和微信/支付宝法币收款，采用 **USD 统一结算**，兼容彩虹易支付和 V免签接口协议。
+多通道聚合收款平台，支持 **支付宝、微信支付及多链 USDT/TRX**，提供码支付（本地收款码）、官方支付接口和上游聚合通道，采用 **USD 统一结算**，兼容彩虹易支付和 V免签下单接口。
 
 ## 核心特性
 
@@ -10,10 +10,14 @@
 - **买卖价差**: 可配置买入卖出浮动，实现利润空间
 - **多数据源**: Binance、OKX、自定义 API
 
-### 🔗 多链支持
-- **加密货币**: TRC20、ERC20、BEP20、Polygon、Optimism、Arbitrum、Base、TRX
-- **法币收款**: 微信支付、支付宝
-- **自动匹配**: 唯一金额标识，精确匹配订单
+### 🔗 多支付方式与通道
+- **支付宝官方**: 当面付扫码、电脑网站支付、手机网站支付
+- **微信官方**: 微信支付 API v3，支持 Native 扫码和 H5 支付
+- **码支付（本地收款码）**: 支付宝、微信收款码，支持系统码和商户个人码，配合支持 v2 协议的监控端匹配到账
+- **上游聚合**: 对接 V免签、彩虹易支付上游
+- **加密货币**: TRX，以及 TRC20、ERC20、BEP20、Polygon、Optimism、Arbitrum、Base、Avalanche 上的 USDT
+- **独立通道选择**: 微信和支付宝可分别指定默认通道
+- **到账确认**: 本地通道按唯一金额匹配，官方通道通过签名通知或签名查单确认
 
 ### 🔔 完整通知系统
 #### 商户通知 (Telegram Bot)
@@ -56,15 +60,15 @@
 - **钱包限制**: 可配置钱包数量上限
 
 ### 📊 接口兼容
-- **彩虹易支付**: 完全兼容 submit.php、mapi.php、api.php
-- **V免签**: 兼容 createOrder、appHeart、appPush 等接口
+- **彩虹易支付**: 兼容 submit.php、mapi.php、api.php 的下单与查询等接口，暂不支持退款
+- **V免签**: 兼容 createOrder 等商户接口；appHeart/appPush 监控接口使用 v2 协议，旧 MD5 收款推送不再支持
 - **标准化**: 统一的响应格式和错误码
 
 ## 快速开始
 
 ### 环境要求
 
-- Go 1.21+
+- Go 1.26.11+（以 `go.mod` 为准）
 - MySQL/MariaDB 8.0+ 或 SQLite
 - Git
 
@@ -196,7 +200,7 @@ release/
 
 ## 配置说明
 
-所有配置都在 `config.yaml` 中，无需 `.env` 文件：
+服务、数据库及区块链节点等基础配置在 `config.yaml` 中，无需 `.env` 文件；支付通道、官方支付密钥、站点地址等在管理后台配置并存储于数据库。
 
 ```yaml
 # 服务器
@@ -312,7 +316,9 @@ blockchain:
 | USD → TRX | 美元转波场 | ✅ Binance |
 | USD → USDT | 美元转USDT | ✅ 固定1:1 |
 
-## 支持的链路
+## 支持的支付方式
+
+各支付方式的配置、付款和验收步骤见 [用户手册：支付方式使用步骤](./docs/05-USER_GUIDE.md#支付方式使用步骤)。
 
 ### 区块链加密货币
 
@@ -328,12 +334,50 @@ blockchain:
 | Base | USDT | Base USDT | 10 |
 | Avalanche | USDT | Avalanche USDT | 12 |
 
-### 传统支付
+### 支付宝与微信
 
-| 类型 | 说明 |
-|------|------|
-| WeChat | 微信支付（需上传收款码） |
-| Alipay | 支付宝（需上传收款码） |
+| 通道 | 标识 | 支持方式 | 到账确认 |
+|------|------|----------|----------|
+| 支付宝官方 | `alipay_official` | 当面付扫码 `f2f`、电脑网站 `page`、手机网站 `wap` | 官方签名通知 / 签名查单 |
+| 微信官方 | `wechat_official` | Native 扫码 `native`、H5 支付 `h5` | 官方签名通知 / 签名查单 |
+| 支付宝码支付 | `local`，`type=alipay` | 支付宝收款码（系统码 / 商户个人码） | v2 监控端推送匹配，或核实到账后人工确认 |
+| 微信码支付 | `local`，`type=wxpay` 或 `wechat` | 微信收款码（系统码 / 商户个人码） | v2 监控端推送匹配，或核实到账后人工确认 |
+| V免签上游 | `vmq` | 以上游已开通的支付方式为准 | 上游签名回调 |
+| 彩虹易支付上游 | `epay` | 以上游已开通的支付方式为准 | 上游签名回调 |
+
+### 启用官方支付
+
+1. 准备已开通对应支付产品的支付宝应用或微信支付商户账号。
+2. 在管理后台「系统设置」的「官方支付」中，填写公网 HTTPS 站点地址 `site_url`，确保官方通知能访问该地址。
+3. 填写所需配置，选择支付模式并启用通道：
+
+| 通道 | 必填配置 |
+|------|----------|
+| 支付宝官方 | 应用 APPID、收款商户 PID、应用私钥、支付宝公钥 |
+| 微信官方 | APPID、商户号 MCHID、商户证书序列号、商户私钥 PEM、32 字节 API v3 密钥；另需微信支付公钥及公钥 ID，或平台证书 PEM |
+
+4. 将「支付宝默认通道」设为 `alipay_official`，或将「微信默认通道」设为 `wechat_official`。也可分别选择本地收款码、V免签或易支付上游。
+5. 使用下方列出的 `type` 创建订单，统一进入本地收银台完成付款。
+
+官方异步通知地址由 `site_url` 自动生成：
+
+| 通道 | 通知路径 |
+|------|----------|
+| 支付宝官方 | `/channel/notify/alipay_official` |
+| 微信官方 | `/channel/notify/wechat_official` |
+
+官方通道按精确 CNY 金额收款，不添加本地金额识别偏移；同币种订单最多支持两位小数。网站/H5 模式使用付款链接，扫码模式展示动态二维码。浏览器返回或用户点击「已付款」不能作为到账依据，订单以服务端验证结果为准。
+
+### 启用码支付（支付宝 / 微信本地收款码）
+
+1. 在钱包管理中选择「支付宝收款」或「微信收款」，上传对应收款码并启用。管理员可配置系统码，商户可添加个人码。
+2. 商户在「设置」中选择钱包模式：仅系统钱包、仅个人钱包或两者同时使用。个人钱包收款前需确保余额足够支付手续费。
+3. 管理员将对应支付方式的默认通道设为 `local`，并在链路管理中启用支付宝或微信。
+4. 商户在「设置 → 监控客户端配置」获取配置二维码或服务器地址、通讯密钥，在支持 **v2 监控协议**的客户端中配置并授权收款通知监听。
+5. 创建 `type=alipay` 或 `type=wxpay` 的订单，人民币标价使用 `currency=CNY`；付款人扫描收银台中的收款码，按显示的精确金额付款。
+6. 监控端上报后核对订单状态和商户通知；仅上传收款码或心跳连通不会自动确认付款。
+
+监控端需支持 HMAC-SHA256 签名及收款事件去重，旧版 MD5 推送需要升级。商户自助确认仅适用于自己的微信/支付宝个人钱包订单，操作前必须核实真实到账。详细步骤和排查方法见 [用户手册](./docs/05-USER_GUIDE.md#支付宝微信码支付本地收款码)。
 
 ## Telegram 通知
 
@@ -413,6 +457,10 @@ blockchain:
 | ip_blacklist | IP 黑名单表 |
 | block_scan_progress | 区块扫描进度表 |
 | app_versions | APP版本表 |
+| amount_locks | 本地通道金额分配并发锁 |
+| monitor_events | 收款监控事件及去重记录 |
+| official_payments | 官方交易与本地订单绑定记录 |
+| upstream_payments | 上游交易与本地订单绑定记录 |
 
 ## 安全机制
 
@@ -453,19 +501,33 @@ curl -s "http://localhost:6088/admin/api/dashboard" \
 
 ### 创建订单（彩虹易支付格式）
 
+支付方式由 `type` 指定，实际通道由后台配置决定，无需为切换官方通道修改原有客户端：
+
+| 支付方式 | `type` | 建议计价货币 |
+|----------|--------|--------------|
+| 支付宝 | `alipay` | `CNY` |
+| 微信支付 | `wxpay` 或 `wechat` | `CNY` |
+| TRC20 USDT | `usdt_trc20` | `USD` 或 `USDT` |
+| BEP20 USDT | `usdt_bep20` | `USD` 或 `USDT` |
+| TRX | `trx` | `USD` |
+
+以下以支付宝人民币订单为例；微信支付将 `type` 改为 `wxpay`，并重新计算签名：
+
 ```bash
 # 参数签名: 参数按键名排序后拼接，再追加商户密钥并 MD5
 curl "http://localhost:6088/submit.php" \
   -d "pid=10001" \
-  -d "type=usdt_trc20" \
+  -d "type=alipay" \
   -d "out_trade_no=ORDER123" \
   -d "notify_url=https://your-site.com/notify" \
   -d "return_url=https://your-site.com/return" \
   -d "name=测试商品" \
   -d "money=100" \
-  -d "currency=USD" \
+  -d "currency=CNY" \
   -d "sign=MD5签名"
 ```
+
+`money` 表示商品在 `currency` 下的金额，商户余额仍按 USD 结算。旧客户端不传 `currency` 时，可将商户默认货币设为 `CNY`。接口参数及返回字段详见 [API 文档](./docs/04-API.md)。
 
 ### 健康检查
 
@@ -483,17 +545,16 @@ curl -s "http://localhost:6088/health/detail"
 
 | 文档 | 说明 |
 |------|------|
-| [文档中心](./docs/README.md) | 接口文档和用户手册索引 |
+| [文档中心](./docs/README.md) | 阅读路径、文档维护说明 |
+| [架构设计](./docs/01-ARCHITECTURE.md) | 项目结构、核心模块、性能优化 |
+| [构建指南](./docs/02-BUILD.md) | 开发/生产模式，跨平台编译 |
+| [部署指南](./docs/03-DEPLOY.md) | Systemd、Nginx、Docker |
 | [API文档](./docs/04-API.md) | 彩虹易支付/V免签兼容接口 |
 | [用户手册](./docs/05-USER_GUIDE.md) | 管理员和商户操作指南 |
-
-### GitHub Actions 构建
-
-- 推送分支或创建 Pull Request 时，`CI` 工作流执行 Go 测试和生产版本编译。
-- 在 Actions 的 `Release` 工作流中选择 `Run workflow`，可手动打包全部格式，或单独选择 `archlinux`、`debian`、`tarball`。安装包和 `CHECKSUMS.txt` 可从该次运行的 Artifacts 下载。
-- 推送 `v*` 标签时，自动构建全格式安装包并创建 GitHub Release。手动构建仅上传 Artifacts。
-
-构建使用 Ubuntu 执行器和 Go 1.25，调用仓库内的 `build-all.sh` 和 `pkg/` 打包脚本。
+| [兼容性](./docs/06-COMPATIBILITY.md) | 彩虹易支付/V免签兼容对比 |
+| [Telegram](./docs/07-TELEGRAM.md) | Telegram 配置与测试 |
+| [国际化指南](./docs/08-I18N.md) | 多语言支持、翻译开发 |
+| [测试计划](./docs/09-TESTPLAN.md) | 功能测试计划 |
 
 ## 系统要求
 
@@ -520,7 +581,7 @@ curl -s "http://localhost:6088/health/detail"
 - **RPC故障转移**: 多节点自动切换，指数退避重试
 - **链级限流**: 每条链独立配置请求速率
 
-> 性能指标会受数据库、RPC 节点、链确认数、钱包数量和日志量影响，生产环境上线前请做压测和回归测试。
+> 性能指标会受数据库、RPC 节点、链确认数、钱包数量和日志量影响，生产环境上线前请按 [测试计划](./docs/09-TESTPLAN.md) 做压测和回归测试。
 
 ## 商业节点推荐
 
@@ -548,7 +609,7 @@ blockchain:
 
 ## 交流群组
 
-- 加入 Telegram 交流群：[@OpineWorkOfficial](https://t.me/OpineWorkOfficial)
+- Telegram 交流群: https://t.me/OpineWorkOfficial
 - Telegram 频道: https://t.me/OpineWorkPublish
 - QQ群
 

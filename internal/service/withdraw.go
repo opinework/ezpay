@@ -3,11 +3,13 @@ package service
 import (
 	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"sync"
 	"time"
 
 	"ezpay/internal/model"
+	"ezpay/internal/util"
 
 	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
@@ -31,6 +33,9 @@ func GetWithdrawService() *WithdrawService {
 
 // CreateWithdrawal 创建提现申请
 func (s *WithdrawService) CreateWithdrawal(merchantID uint, req *WithdrawRequest) (*model.Withdrawal, error) {
+	if req == nil || math.IsNaN(req.Amount) || math.IsInf(req.Amount, 0) {
+		return nil, errors.New("金额无效")
+	}
 	// 获取商户信息
 	var merchant model.Merchant
 	if err := model.GetDB().First(&merchant, merchantID).Error; err != nil {
@@ -41,7 +46,7 @@ func (s *WithdrawService) CreateWithdrawal(merchantID uint, req *WithdrawRequest
 	var reqAmount decimal.Decimal
 	if req.AmountStr != "" {
 		var parseErr error
-		reqAmount, parseErr = decimal.NewFromString(req.AmountStr)
+		reqAmount, parseErr = util.ParseAmount(req.AmountStr)
 		if parseErr != nil {
 			return nil, errors.New("金额格式无效")
 		}
@@ -62,6 +67,9 @@ func (s *WithdrawService) CreateWithdrawal(merchantID uint, req *WithdrawRequest
 
 	// 手续费（从配置获取，默认 1 USD）
 	fee := s.getWithdrawFee()
+	if fee.IsNegative() || !reqAmount.GreaterThan(fee) {
+		return nil, errors.New("提现手续费配置无效或大于提现金额")
+	}
 	realAmount := reqAmount.Sub(fee)
 
 	// 验证提现地址
@@ -251,9 +259,12 @@ func (s *WithdrawService) RejectWithdrawal(id uint, adminRemark string) error {
 		}
 
 		// 解冻余额
-		if err := tx.Model(&model.Merchant{}).Where("id = ?", withdrawal.MerchantID).
-			Update("frozen_balance", gorm.Expr("frozen_balance - ?", withdrawal.Amount.String())).Error; err != nil {
-			return err
+		release := tx.Model(&model.Merchant{}).Where("id = ? AND frozen_balance >= ?", withdrawal.MerchantID, withdrawal.Amount.String()).Update("frozen_balance", gorm.Expr("frozen_balance - ?", withdrawal.Amount.String()))
+		if release.Error != nil {
+			return release.Error
+		}
+		if release.RowsAffected != 1 {
+			return errors.New("冻结余额不足或商户不存在")
 		}
 
 		return nil
@@ -301,11 +312,15 @@ func (s *WithdrawService) CompleteWithdrawal(id uint, adminRemark string) error 
 
 		// 扣除余额和冻结余额
 		amountStr := withdrawal.Amount.String()
-		if err := tx.Model(&model.Merchant{}).Where("id = ?", withdrawal.MerchantID).Updates(map[string]interface{}{
+		debit := tx.Model(&model.Merchant{}).Where("id = ? AND balance >= ? AND frozen_balance >= ?", withdrawal.MerchantID, amountStr, amountStr).Updates(map[string]interface{}{
 			"balance":        gorm.Expr("balance - ?", amountStr),
 			"frozen_balance": gorm.Expr("frozen_balance - ?", amountStr),
-		}).Error; err != nil {
-			return err
+		})
+		if debit.Error != nil {
+			return debit.Error
+		}
+		if debit.RowsAffected != 1 {
+			return errors.New("余额或冻结余额不足，已撤销打款状态更新")
 		}
 
 		return nil

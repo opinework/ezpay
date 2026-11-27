@@ -14,13 +14,14 @@ import (
 
 	"ezpay/internal/model"
 	"ezpay/internal/util"
+	"gorm.io/gorm"
 )
 
 // NotifyService 回调通知服务
 type NotifyService struct {
 	mu     sync.Mutex
-	sem    chan struct{}   // 并发限制信号量
-	client *http.Client   // 复用 HTTP Client
+	sem    chan struct{} // 并发限制信号量
+	client *http.Client  // 复用 HTTP Client
 }
 
 var notifyService *NotifyService
@@ -30,15 +31,8 @@ var notifyOnce sync.Once
 func GetNotifyService() *NotifyService {
 	notifyOnce.Do(func() {
 		notifyService = &NotifyService{
-			sem: make(chan struct{}, 20), // 最多20个并发回调
-			client: &http.Client{
-				Timeout: 15 * time.Second,
-				Transport: &http.Transport{
-					MaxIdleConns:        50,
-					MaxIdleConnsPerHost: 5,
-					IdleConnTimeout:     90 * time.Second,
-				},
-			},
+			sem:    make(chan struct{}, 20), // 最多20个并发回调
+			client: util.NewPublicHTTPClient(15 * time.Second),
 		}
 	})
 	return notifyService
@@ -55,9 +49,22 @@ func (s *NotifyService) NotifyOrder(orderID uint) {
 		log.Printf("NotifyOrder: order not found: %d", orderID)
 		return
 	}
+	if order.Status != model.OrderStatusPaid || order.NotifyStatus == model.NotifyStatusSuccess || order.NotifyURL == "" || order.Merchant == nil {
+		return
+	}
+	maxRetry := s.getMaxRetry()
+	leaseUntil := time.Now().Add(15 * time.Minute).Truncate(time.Millisecond)
+	claim := model.GetDB().Model(&model.Order{}).Where("id = ? AND status = ? AND notify_status <> ? AND notify_count < ? AND (notify_lease_until IS NULL OR notify_lease_until < ?)",
+		orderID, model.OrderStatusPaid, model.NotifyStatusSuccess, maxRetry*3, time.Now()).Update("notify_lease_until", leaseUntil)
+	if claim.Error != nil || claim.RowsAffected != 1 {
+		return
+	}
+	defer model.GetDB().Model(&model.Order{}).Where("id = ? AND notify_lease_until = ?", orderID, leaseUntil).Update("notify_lease_until", nil)
 
 	// 发送机器人通知
-	GetBotService().NotifyOrderPaid(&order)
+	if order.NotifyCount == 0 {
+		GetBotService().NotifyOrderPaid(&order)
+	}
 
 	if order.NotifyURL == "" {
 		log.Printf("NotifyOrder: no notify url for order: %s", order.TradeNo)
@@ -74,6 +81,7 @@ func (s *NotifyService) NotifyOrder(orderID uint) {
 		log.Printf("NotifyOrder: unsafe notify url blocked: %s (order: %s)", order.NotifyURL, order.TradeNo)
 		model.GetDB().Model(&order).Updates(map[string]interface{}{
 			"notify_status": model.NotifyStatusFailed,
+			"notify_count":  gorm.Expr("notify_count + 1"),
 		})
 		return
 	}
@@ -94,15 +102,18 @@ func (s *NotifyService) NotifyOrder(orderID uint) {
 	}, order.Merchant.Key)
 
 	// 重试通知
-	maxRetry := s.getMaxRetry()
 	for i := 0; i < maxRetry; i++ {
+		attempt := model.GetDB().Model(&model.Order{}).Where("id = ? AND notify_lease_until = ? AND notify_count < ?", order.ID, leaseUntil, maxRetry*3).
+			Update("notify_count", gorm.Expr("notify_count + 1"))
+		if attempt.Error != nil || attempt.RowsAffected != 1 {
+			return
+		}
 		success := s.sendNotify(order.NotifyURL, params)
 		if success {
 			// 原子更新 notify_count 和 status
 			model.GetDB().Model(&model.Order{}).
-				Where("id = ?", order.ID).
+				Where("id = ? AND notify_lease_until = ?", order.ID, leaseUntil).
 				Updates(map[string]interface{}{
-					"notify_count":  order.NotifyCount + i + 1,
 					"notify_status": model.NotifyStatusSuccess,
 				})
 			log.Printf("NotifyOrder: success for order: %s (attempt %d)", order.TradeNo, i+1)
@@ -117,9 +128,8 @@ func (s *NotifyService) NotifyOrder(orderID uint) {
 
 	// 通知失败 - 原子更新
 	model.GetDB().Model(&model.Order{}).
-		Where("id = ?", order.ID).
+		Where("id = ? AND notify_lease_until = ? AND notify_status <> ?", order.ID, leaseUntil, model.NotifyStatusSuccess).
 		Updates(map[string]interface{}{
-			"notify_count":  order.NotifyCount + maxRetry,
 			"notify_status": model.NotifyStatusFailed,
 		})
 	log.Printf("NotifyOrder: failed for order: %s after %d retries", order.TradeNo, maxRetry)
@@ -136,7 +146,7 @@ func (s *NotifyService) isURLSafe(rawURL string) bool {
 	}
 
 	// 只允许 http/https
-	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+	if (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.User != nil {
 		return false
 	}
 
@@ -178,9 +188,7 @@ func (s *NotifyService) isURLSafe(rawURL string) bool {
 
 // isPrivateIP 检查 IP 是否为内网/保留地址
 func isPrivateIP(ip net.IP) bool {
-	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() ||
-		ip.IsLinkLocalMulticast() || ip.IsUnspecified() ||
-		ip.Equal(net.ParseIP("169.254.169.254")) // 云元数据地址
+	return util.IsPrivateIP(ip)
 }
 
 // phpURLEncode 模拟 PHP 的 urlencode() 行为
@@ -201,19 +209,14 @@ func phpURLEncode(params map[string]string) string {
 // URL 编码使用与 PHP urlencode() 一致的方式（空格→+）
 func (s *NotifyService) sendNotify(notifyURL string, params map[string]string) bool {
 	// 构建查询字符串（使用 PHP 兼容编码）
-	queryString := phpURLEncode(params)
-
-	// GET 请求（与 PHP epay 一致）
-	fullURL := notifyURL
-	if strings.Contains(notifyURL, "?") {
-		fullURL += "&" + queryString
-	} else {
-		fullURL += "?" + queryString
+	fullURL := mergePaymentQuery(notifyURL, params)
+	if fullURL == "" {
+		return false
 	}
 
 	resp, err := s.client.Get(fullURL)
 	if err != nil {
-		log.Printf("sendNotify error: %v (url: %s)", err, notifyURL)
+		log.Printf("sendNotify transport failure: %T", err)
 		return false
 	}
 	defer resp.Body.Close()
@@ -242,7 +245,7 @@ func (s *NotifyService) getMaxRetry() int {
 		return 5
 	}
 	retry, err := strconv.Atoi(config.Value)
-	if err != nil {
+	if err != nil || retry < 1 || retry > 10 {
 		return 5
 	}
 	return retry
@@ -258,8 +261,9 @@ func (s *NotifyService) RetryFailedNotify() {
 
 	var orders []model.Order
 	model.GetDB().
-		Where("status = ? AND notify_status = ? AND notify_count < ?",
-			model.OrderStatusPaid, model.NotifyStatusFailed, maxTotalRetry).
+		Where("status = ? AND notify_status IN (?, ?) AND notify_count < ? AND notify_url <> '' AND (notify_lease_until IS NULL OR notify_lease_until < ?)",
+			model.OrderStatusPaid, model.NotifyStatusFailed, model.NotifyStatusPending, maxTotalRetry, time.Now()).
+		Order("id ASC").
 		Limit(50). // 每批最多处理50个
 		Find(&orders)
 
@@ -288,16 +292,20 @@ func (s *NotifyService) BuildReturnURL(order *model.Order, merchant *model.Merch
 		Param:       order.Param,
 	}, merchant.Key)
 
-	queryString := phpURLEncode(params)
+	return mergePaymentQuery(order.ReturnURL, params)
+}
 
-	returnURL := order.ReturnURL
-	if strings.Contains(returnURL, "?") {
-		returnURL += "&" + queryString
-	} else {
-		returnURL += "?" + queryString
+func mergePaymentQuery(rawURL string, params map[string]string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" || u.User != nil {
+		return ""
 	}
-
-	return returnURL
+	values := u.Query()
+	for key, value := range params {
+		values.Set(key, value)
+	}
+	u.RawQuery = values.Encode()
+	return u.String()
 }
 
 // StartNotifyWorker 启动通知工作协程
@@ -323,6 +331,13 @@ func (s *NotifyService) ManualNotify(orderID uint) error {
 
 	if order.Status != model.OrderStatusPaid {
 		return fmt.Errorf("order not paid")
+	}
+	reset := model.GetDB().Model(&order).Where("notify_lease_until IS NULL OR notify_lease_until < ?", time.Now()).Updates(map[string]interface{}{"notify_status": model.NotifyStatusFailed, "notify_count": 0})
+	if reset.Error != nil {
+		return reset.Error
+	}
+	if reset.RowsAffected != 1 {
+		return fmt.Errorf("notification is already running")
 	}
 
 	go s.NotifyOrder(orderID)

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -25,7 +27,7 @@ func (s *BlockchainService) scanTRXImproved(listener *ChainListener, addresses m
 		path := fmt.Sprintf("/v1/accounts/%s/transactions?only_confirmed=true&limit=200", addr)
 
 		// 使用支持重试的 RPC 客户端
-		resp, err := rpcClient.Get(path)
+		body, err := fetchTronData(rpcClient, path)
 		if err != nil {
 			log.Printf("[trx] Failed to get transactions for %s: %v", addr, err)
 			s.metrics.RecordRPCCall("trx", false, 0)
@@ -34,19 +36,13 @@ func (s *BlockchainService) scanTRXImproved(listener *ChainListener, addresses m
 
 		s.metrics.RecordRPCCall("trx", true, 0)
 
-		body, err := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		if err != nil {
-			log.Printf("[trx] Failed to read response for %s: %v", addr, err)
-			continue
-		}
-
 		var result struct {
 			Data []struct {
 				TxID        string `json:"txID"`
 				BlockNumber int64  `json:"blockNumber"`
 				RawData     struct {
-					Contract []struct {
+					Timestamp int64 `json:"timestamp"`
+					Contract  []struct {
 						Type      string `json:"type"`
 						Parameter struct {
 							Value struct {
@@ -90,7 +86,7 @@ func (s *BlockchainService) scanTRXImproved(listener *ChainListener, addresses m
 				toAddr = hexToBase58(toAddr)
 			}
 			// 检查是否是转入交易（wallet cache 使用小写 key）
-			if !addresses[strings.ToLower(toAddr)] {
+			if !addresses[normalizeAddress(toAddr, listener.chain)] {
 				continue
 			}
 
@@ -109,9 +105,9 @@ func (s *BlockchainService) scanTRXImproved(listener *ChainListener, addresses m
 			if strings.HasPrefix(fromAddr, "41") {
 				fromAddr = hexToBase58(fromAddr)
 			}
-			fromAddr = strings.ToLower(fromAddr)
 
 			transfers = append(transfers, Transfer{
+				Timestamp:   time.UnixMilli(tx.RawData.Timestamp),
 				TxHash:      tx.TxID,
 				From:        fromAddr,
 				To:          toAddr,
@@ -136,7 +132,7 @@ func (s *BlockchainService) scanTRC20Improved(listener *ChainListener, addresses
 		path := fmt.Sprintf("/v1/accounts/%s/transactions/trc20?only_confirmed=true&limit=200&contract_address=%s",
 			addr, listener.contractAddress)
 
-		resp, err := rpcClient.Get(path)
+		body, err := fetchTronData(rpcClient, path)
 		if err != nil {
 			log.Printf("[trc20] Failed to get transactions for %s: %v", addr, err)
 			s.metrics.RecordRPCCall("trc20", false, 0)
@@ -144,13 +140,6 @@ func (s *BlockchainService) scanTRC20Improved(listener *ChainListener, addresses
 		}
 
 		s.metrics.RecordRPCCall("trc20", true, 0)
-
-		body, err := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		if err != nil {
-			log.Printf("[trc20] Failed to read response for %s: %v", addr, err)
-			continue
-		}
 
 		var result struct {
 			Data []struct {
@@ -169,7 +158,7 @@ func (s *BlockchainService) scanTRC20Improved(listener *ChainListener, addresses
 
 		for _, tx := range result.Data {
 			// 检查是否是转入交易（wallet cache 使用小写 key）
-			if !addresses[strings.ToLower(tx.To)] {
+			if !addresses[normalizeAddress(tx.To, listener.chain)] {
 				continue
 			}
 
@@ -185,16 +174,69 @@ func (s *BlockchainService) scanTRC20Improved(listener *ChainListener, addresses
 			amount := parseTokenAmount(tx.Value, 6)
 
 			transfers = append(transfers, Transfer{
-				TxHash: tx.TransactionID,
-				From:   tx.From,
-				To:     tx.To,
-				Amount: amount,
-				Chain:  "trc20",
+				Timestamp: time.UnixMilli(tx.BlockTimestamp),
+				TxHash:    tx.TransactionID,
+				From:      tx.From,
+				To:        tx.To,
+				Amount:    amount,
+				Chain:     "trc20",
 			})
 		}
 	}
 
 	return transfers, nil
+}
+
+func fetchTronData(client *RPCClient, path string) ([]byte, error) {
+	var all []json.RawMessage
+	seen := make(map[string]bool)
+	base, err := url.Parse(path)
+	if err != nil {
+		return nil, err
+	}
+	for page := 0; page < 100; page++ {
+		if seen[path] {
+			return nil, fmt.Errorf("repeated TRON pagination cursor")
+		}
+		seen[path] = true
+		resp, err := client.Get(path)
+		if err != nil {
+			return nil, err
+		}
+		body, readErr := io.ReadAll(io.LimitReader(resp.Body, (2<<20)+1))
+		resp.Body.Close()
+		if readErr != nil {
+			return nil, readErr
+		}
+		if resp.StatusCode != 200 || len(body) > 2<<20 {
+			return nil, fmt.Errorf("invalid TRON response")
+		}
+		var result struct {
+			Data    []json.RawMessage `json:"data"`
+			Success *bool             `json:"success"`
+			Meta    struct {
+				Links struct {
+					Next string `json:"next"`
+				} `json:"links"`
+			} `json:"meta"`
+		}
+		if err := json.Unmarshal(body, &result); err != nil {
+			return nil, err
+		}
+		if result.Data == nil || (result.Success != nil && !*result.Success) {
+			return nil, fmt.Errorf("TRON query rejected")
+		}
+		all = append(all, result.Data...)
+		if result.Meta.Links.Next == "" {
+			return json.Marshal(map[string]interface{}{"data": all})
+		}
+		next, err := url.Parse(result.Meta.Links.Next)
+		if err != nil || next.Path != base.Path {
+			return nil, fmt.Errorf("invalid TRON pagination path")
+		}
+		path = next.RequestURI()
+	}
+	return nil, fmt.Errorf("TRON pagination limit reached; checkpoint retained")
 }
 
 // scanEVMImproved 改进的 EVM 扫描（支持重组检测）
@@ -217,9 +259,14 @@ func (s *BlockchainService) scanEVMImproved(listener *ChainListener, addresses m
 	s.metrics.UpdateBlockHeight(listener.chain, currentBlock, listener.lastBlock)
 
 	// 计算安全区块
+	if listener.confirmations < 0 || currentBlock <= uint64(listener.confirmations) {
+		return nil, nil
+	}
 	safeBlock := currentBlock - uint64(listener.confirmations)
 	if listener.lastBlock == 0 {
-		listener.lastBlock = safeBlock - 100 // 首次启动，扫描最近100个区块
+		if safeBlock > 100 {
+			listener.lastBlock = safeBlock - 100
+		}
 	}
 
 	if listener.lastBlock >= safeBlock {
@@ -292,25 +339,27 @@ func (s *BlockchainService) scanEVMImproved(listener *ChainListener, addresses m
 	}
 
 	// 解析日志响应的公共函数
-	parseLogResults := func(resultData json.RawMessage) {
+	blockTimes := make(map[string]time.Time)
+	parseLogResults := func(resultData json.RawMessage) error {
 		var logs []struct {
 			TransactionHash string   `json:"transactionHash"`
 			Topics          []string `json:"topics"`
 			Data            string   `json:"data"`
 			BlockNumber     string   `json:"blockNumber"`
+			LogIndex        string   `json:"logIndex"`
 		}
 
 		if err := json.Unmarshal(resultData, &logs); err != nil {
 			log.Printf("[%s] Failed to unmarshal logs: %v", listener.chain, err)
-			return
+			return err
 		}
 
 		for _, logEntry := range logs {
 			// ERC20 Transfer 事件需要 3 个 Topics: event sig, from, to
-			if len(logEntry.Topics) < 3 || len(logEntry.Topics[1]) < 27 || len(logEntry.Topics[2]) < 27 {
+			if len(logEntry.Topics) != 3 || len(logEntry.Topics[1]) != 66 || len(logEntry.Topics[2]) != 66 || logEntry.TransactionHash == "" {
 				log.Printf("[%s] Skipping log with insufficient topics (tx: %s, topics: %d)",
 					listener.chain, logEntry.TransactionHash, len(logEntry.Topics))
-				continue
+				return fmt.Errorf("malformed transfer log")
 			}
 
 			// 解析from地址
@@ -322,17 +371,23 @@ func (s *BlockchainService) scanEVMImproved(listener *ChainListener, addresses m
 			// 解析金额（BEP20 USDT 是 18 位，其它 EVM 链 USDT 是 6 位）
 			amount := parseHexAmount(logEntry.Data, chainTokenDecimals(listener.chain))
 
-			// 检查是否已处理
-			var count int64
-			model.GetDB().Model(&model.TransactionLog{}).Where("tx_hash = ?", logEntry.TransactionHash).Count(&count)
-			if count > 0 {
-				s.metrics.RecordDuplicateTx(listener.chain)
-				continue
+			blockNum := parseHexUint64(logEntry.BlockNumber)
+			if logEntry.LogIndex == "" {
+				return fmt.Errorf("missing transfer log index")
+			}
+			stamp, exists := blockTimes[logEntry.BlockNumber]
+			if !exists {
+				var err error
+				stamp, err = s.evmBlockTime(rpcClient, logEntry.BlockNumber)
+				if err != nil {
+					return err
+				}
+				blockTimes[logEntry.BlockNumber] = stamp
 			}
 
-			blockNum := parseHexUint64(logEntry.BlockNumber)
-
 			transfers = append(transfers, Transfer{
+				EventID:     logEntry.TransactionHash + ":" + logEntry.LogIndex,
+				Timestamp:   stamp,
 				TxHash:      logEntry.TransactionHash,
 				From:        from,
 				To:          to,
@@ -341,6 +396,7 @@ func (s *BlockchainService) scanEVMImproved(listener *ChainListener, addresses m
 				Chain:       listener.chain,
 			})
 		}
+		return nil
 	}
 
 	// 发送请求
@@ -353,7 +409,7 @@ func (s *BlockchainService) scanEVMImproved(listener *ChainListener, addresses m
 				if err != nil {
 					log.Printf("[%s] RPC call failed: %v", listener.chain, err)
 					s.metrics.RecordRPCCall(listener.chain, false, 0)
-					continue
+					return nil, err
 				}
 
 				s.metrics.RecordRPCCall(listener.chain, true, 0)
@@ -361,15 +417,17 @@ func (s *BlockchainService) scanEVMImproved(listener *ChainListener, addresses m
 				var resp BatchResponse
 				if err := json.Unmarshal(respBody, &resp); err != nil {
 					log.Printf("[%s] Failed to unmarshal response: %v", listener.chain, err)
-					continue
+					return nil, err
 				}
 
 				if resp.Error != nil {
 					log.Printf("[%s] RPC error: %s", listener.chain, resp.Error.Message)
-					continue
+					return nil, fmt.Errorf("RPC log query: %s", resp.Error.Message)
 				}
 
-				parseLogResults(resp.Result)
+				if err := parseLogResults(resp.Result); err != nil {
+					return nil, err
+				}
 
 				// 请求之间等待
 				if i < len(batchRequests)-1 {
@@ -393,13 +451,32 @@ func (s *BlockchainService) scanEVMImproved(listener *ChainListener, addresses m
 				}
 
 				s.metrics.RecordRPCCall(listener.chain, true, 0)
+				if len(responses) != len(chunk) {
+					return nil, fmt.Errorf("incomplete RPC batch response")
+				}
+				seen := make(map[int]bool)
+				for _, resp := range responses {
+					valid := false
+					for _, req := range chunk {
+						if req.ID == resp.ID {
+							valid = true
+							break
+						}
+					}
+					if !valid || seen[resp.ID] {
+						return nil, fmt.Errorf("invalid RPC batch identity")
+					}
+					seen[resp.ID] = true
+				}
 
 				for _, resp := range responses {
 					if resp.Error != nil {
 						log.Printf("[%s] RPC error in batch response: %s", listener.chain, resp.Error.Message)
-						continue
+						return nil, fmt.Errorf("RPC log query: %s", resp.Error.Message)
 					}
-					parseLogResults(resp.Result)
+					if err := parseLogResults(resp.Result); err != nil {
+						return nil, err
+					}
 				}
 
 				// 批次之间等待
@@ -412,6 +489,29 @@ func (s *BlockchainService) scanEVMImproved(listener *ChainListener, addresses m
 
 	listener.lastBlock = queryToBlock
 	return transfers, nil
+}
+
+func (s *BlockchainService) evmBlockTime(client *RPCClient, block string) (time.Time, error) {
+	body, err := client.PostJSON("", map[string]interface{}{"jsonrpc": "2.0", "id": 1, "method": "eth_getBlockByNumber", "params": []interface{}{block, false}})
+	if err != nil {
+		return time.Time{}, err
+	}
+	var response struct {
+		Result *struct {
+			Timestamp string `json:"timestamp"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(body, &response); err != nil {
+		return time.Time{}, err
+	}
+	if response.Result == nil || !strings.HasPrefix(response.Result.Timestamp, "0x") {
+		return time.Time{}, fmt.Errorf("missing block timestamp")
+	}
+	stamp, err := strconv.ParseInt(strings.TrimPrefix(response.Result.Timestamp, "0x"), 16, 64)
+	if err != nil || stamp <= 0 {
+		return time.Time{}, fmt.Errorf("invalid block timestamp")
+	}
+	return time.Unix(stamp, 0), nil
 }
 
 // getEVMBlockNumberWithRetry 获取 EVM 区块号（带重试）
@@ -430,11 +530,17 @@ func (s *BlockchainService) getEVMBlockNumberWithRetry(rpcClient *RPCClient) (ui
 
 	var result struct {
 		Result string `json:"result"`
+		Error  *struct {
+			Message string `json:"message"`
+		} `json:"error"`
 	}
 
 	if err := json.Unmarshal(body, &result); err != nil {
 		return 0, err
 	}
 
-	return parseHexUint64(result.Result), nil
+	if result.Error != nil || !strings.HasPrefix(result.Result, "0x") {
+		return 0, fmt.Errorf("invalid block number response")
+	}
+	return strconv.ParseUint(strings.TrimPrefix(result.Result, "0x"), 16, 64)
 }

@@ -62,7 +62,7 @@ const (
 
 // TelegramUpdate Telegram消息更新
 type TelegramUpdate struct {
-	UpdateID int64           `json:"update_id"`
+	UpdateID int64            `json:"update_id"`
 	Message  *TelegramMessage `json:"message"`
 }
 
@@ -461,11 +461,14 @@ func (s *TelegramService) handleHelp(chatID int64) {
 
 // SendMessage 发送文本消息
 func (s *TelegramService) SendMessage(chatID int64, text string) error {
-	if !s.enabled || s.botToken == "" || chatID == 0 {
+	s.mu.Lock()
+	enabled, token, apiURL := s.enabled, s.botToken, s.apiURL
+	s.mu.Unlock()
+	if !enabled || token == "" || chatID == 0 {
 		return nil
 	}
 
-	url := fmt.Sprintf("%s/bot%s/sendMessage", s.apiURL, s.botToken)
+	url := fmt.Sprintf("%s/bot%s/sendMessage", apiURL, token)
 
 	payload := map[string]interface{}{
 		"chat_id": chatID,
@@ -485,11 +488,14 @@ func (s *TelegramService) SendMessage(chatID int64, text string) error {
 
 // SendMessageMarkdown 发送Markdown格式消息
 func (s *TelegramService) SendMessageMarkdown(chatID int64, text string) error {
-	if !s.enabled || s.botToken == "" || chatID == 0 {
+	s.mu.Lock()
+	enabled, token, apiURL := s.enabled, s.botToken, s.apiURL
+	s.mu.Unlock()
+	if !enabled || token == "" || chatID == 0 {
 		return nil
 	}
 
-	url := fmt.Sprintf("%s/bot%s/sendMessage", s.apiURL, s.botToken)
+	url := fmt.Sprintf("%s/bot%s/sendMessage", apiURL, token)
 
 	payload := map[string]interface{}{
 		"chat_id":    chatID,
@@ -526,6 +532,9 @@ func (s *TelegramService) SendMessageMarkdown(chatID int64, text string) error {
 
 // SendToMerchant 发送消息给商户
 func (s *TelegramService) SendToMerchant(merchantID uint, text string) error {
+	if !s.IsEnabled() {
+		return nil
+	}
 	var merchant model.Merchant
 	if err := model.GetDB().First(&merchant, merchantID).Error; err != nil {
 		return err
@@ -969,6 +978,8 @@ func (s *TelegramService) truncateUA(ua string) string {
 
 // IsEnabled 检查是否启用
 func (s *TelegramService) IsEnabled() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return s.enabled && s.botToken != ""
 }
 
@@ -981,7 +992,10 @@ func (s *TelegramService) SetEnabled(enabled bool) {
 
 // UpdateConfig 更新配置（兼容旧版本，仅更新 token 和启用状态）
 func (s *TelegramService) UpdateConfig(enabled bool, botToken string) {
-	s.UpdateFullConfig(enabled, botToken, s.mode, s.webhookURL, s.secretToken)
+	s.mu.Lock()
+	mode, webhookURL, secret := s.mode, s.webhookURL, s.secretToken
+	s.mu.Unlock()
+	s.UpdateFullConfig(enabled, botToken, mode, webhookURL, secret)
 }
 
 // UpdateFullConfig 更新完整配置（包括模式、webhook URL 和 secret）
@@ -1051,7 +1065,7 @@ func (s *TelegramService) setupWebhook() error {
 		"url":             s.webhookURL,
 		"max_connections": 40,
 		"allowed_updates": []string{"message"}, // 只接收消息更新
-		"secret_token":    s.secretToken,        // 验证密钥，Telegram 会在请求头中携带
+		"secret_token":    s.secretToken,       // 验证密钥，Telegram 会在请求头中携带
 	}
 
 	data, err := json.Marshal(payload)

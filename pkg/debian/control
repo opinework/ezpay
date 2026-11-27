@@ -2,7 +2,7 @@ Source: ezpay
 Section: net
 Priority: optional
 Maintainer: Your Name <your.email@example.com>
-Build-Depends: debhelper (>= 12), golang-go (>= 2:1.21)
+Build-Depends: debhelper (>= 12), golang-go (>= 2:1.26.11)
 Standards-Version: 4.5.1
 Homepage: https://github.com/yourusername/ezpay
 

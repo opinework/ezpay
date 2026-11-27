@@ -4,7 +4,9 @@ import (
 	"log"
 	"net/http"
 
+	"ezpay/internal/model"
 	"ezpay/internal/service"
+	"ezpay/internal/util"
 
 	"github.com/gin-gonic/gin"
 	"github.com/shopspring/decimal"
@@ -22,19 +24,19 @@ func NewChannelHandler() *ChannelHandler {
 // GET /channel/notify/vmq
 func (h *ChannelHandler) VmqNotify(c *gin.Context) {
 	// V免签回调参数
-	payID := c.Query("payId")       // 商户订单号
-	param := c.Query("param")       // 附加参数 (存储的是本地订单号)
-	payType := c.Query("type")      // 支付类型
-	price := c.Query("price")       // 订单金额
+	payID := c.Query("payId")             // 商户订单号
+	param := c.Query("param")             // 附加参数 (存储的是本地订单号)
+	payType := c.Query("type")            // 支付类型
+	price := c.Query("price")             // 订单金额
 	reallyPrice := c.Query("reallyPrice") // 实际金额
-	sign := c.Query("sign")         // 签名
+	sign := c.Query("sign")               // 签名
 
 	log.Printf("Vmq notify received: payId=%s, param=%s, type=%s, price=%s, reallyPrice=%s",
 		payID, param, payType, price, reallyPrice)
 
 	// 获取V免签通道配置
 	channelService := service.GetChannelService()
-	cfg, err := channelService.GetChannelConfig(service.ChannelTypeVmq)
+	cfg, err := channelService.GetCallbackChannelConfig(service.ChannelTypeVmq)
 	if err != nil {
 		log.Printf("Vmq channel not configured: %v", err)
 		c.String(http.StatusOK, "fail")
@@ -52,6 +54,12 @@ func (h *ChannelHandler) VmqNotify(c *gin.Context) {
 	localTradeNo := param
 	if localTradeNo == "" {
 		localTradeNo = payID
+	}
+	var order model.Order
+	if model.GetDB().Where("trade_no = ?", localTradeNo).First(&order).Error != nil ||
+		(payID != order.TradeNo && payID != order.OutTradeNo) || util.GetPaymentTypeChain(payType) != order.Chain {
+		c.String(http.StatusOK, "fail")
+		return
 	}
 
 	// 解析实际金额
@@ -80,7 +88,6 @@ func (h *ChannelHandler) EpayNotify(c *gin.Context) {
 	tradeNo := c.Query("trade_no")
 	outTradeNo := c.Query("out_trade_no") // 本地订单号
 	payType := c.Query("type")
-	name := c.Query("name")
 	money := c.Query("money")
 	tradeStatus := c.Query("trade_status")
 	sign := c.Query("sign")
@@ -88,15 +95,9 @@ func (h *ChannelHandler) EpayNotify(c *gin.Context) {
 	log.Printf("Epay notify received: pid=%s, trade_no=%s, out_trade_no=%s, status=%s",
 		pid, tradeNo, outTradeNo, tradeStatus)
 
-	// 只处理支付成功的通知
-	if tradeStatus != "TRADE_SUCCESS" {
-		c.String(http.StatusOK, "success")
-		return
-	}
-
 	// 获取易支付通道配置
 	channelService := service.GetChannelService()
-	cfg, err := channelService.GetChannelConfig(service.ChannelTypeEpay)
+	cfg, err := channelService.GetCallbackChannelConfig(service.ChannelTypeEpay)
 	if err != nil {
 		log.Printf("Epay channel not configured: %v", err)
 		c.String(http.StatusOK, "fail")
@@ -104,19 +105,28 @@ func (h *ChannelHandler) EpayNotify(c *gin.Context) {
 	}
 
 	// 验证签名
-	params := map[string]string{
-		"pid":          pid,
-		"trade_no":     tradeNo,
-		"out_trade_no": outTradeNo,
-		"type":         payType,
-		"name":         name,
-		"money":        money,
-		"trade_status": tradeStatus,
+	params := make(map[string]string)
+	for key, values := range c.Request.URL.Query() {
+		if len(values) != 1 {
+			c.String(http.StatusOK, "fail")
+			return
+		}
+		params[key] = values[0]
 	}
 
 	if !channelService.VerifyEpayNotify(cfg, params, sign) {
 		log.Printf("Epay notify sign verify failed")
 		c.String(http.StatusOK, "fail")
+		return
+	}
+	var order model.Order
+	if pid != cfg.PayID || model.GetDB().Where("trade_no = ?", outTradeNo).First(&order).Error != nil || util.GetPaymentTypeChain(payType) != order.Chain ||
+		(c.Query("currency") != "" && c.Query("currency") != order.Currency) || (c.Query("pay_currency") != "" && c.Query("pay_currency") != order.PayCurrency) {
+		c.String(http.StatusOK, "fail")
+		return
+	}
+	if tradeStatus != "TRADE_SUCCESS" {
+		c.String(http.StatusOK, "success")
 		return
 	}
 

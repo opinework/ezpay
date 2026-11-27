@@ -89,7 +89,7 @@ func (h *EpayHandler) Submit(c *gin.Context) {
 
 	// 验证签名
 	if !util.VerifySign(params, merchant.Key, sign) {
-		log.Printf("[Submit] 签名验证失败, 收到: %s, 计算: %s", sign, util.GenerateSign(params, merchant.Key))
+		log.Printf("[Submit] 签名验证失败, pid=%s", pid)
 		middleware.SetAPILogContext(c, -1, "签名验证失败", "", merchant.ID, pid)
 		h.renderError(c, "签名验证失败")
 		return
@@ -202,7 +202,7 @@ func (h *EpayHandler) MAPISubmit(c *gin.Context) {
 	}
 
 	if !util.VerifySign(params, merchant.Key, sign) {
-		log.Printf("[MAPISubmit] 签名验证失败, 收到: %s, 计算: %s", sign, util.GenerateSign(params, merchant.Key))
+		log.Printf("[MAPISubmit] 签名验证失败, pid=%s", pid)
 		middleware.SetAPILogContext(c, -1, "签名验证失败", "", merchant.ID, pid)
 		c.JSON(http.StatusOK, gin.H{
 			"code": -1,
@@ -760,7 +760,13 @@ func (h *EpayHandler) GetPaymentTypes(c *gin.Context) {
 	var enabledTypes []PaymentTypeInfo
 	for _, pt := range allPaymentTypes {
 		// 必须同时满足：区块链服务启用 + 商户有对应钱包
-		pt.Enabled = isChainEnabled(pt.Chain) && availableChains[pt.Chain]
+		available := availableChains[pt.Chain]
+		channel := service.GetOrderService().PaymentChannel(pt.Chain)
+		if channel != "local" {
+			_, err := service.GetChannelService().GetChannelConfig(service.ChannelType(channel))
+			available = err == nil
+		}
+		pt.Enabled = isChainEnabled(pt.Chain) && available
 		enabledTypes = append(enabledTypes, pt)
 	}
 

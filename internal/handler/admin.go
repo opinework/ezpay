@@ -393,7 +393,7 @@ func (h *AdminHandler) CleanInvalidOrders(c *gin.Context) {
 		model.OrderStatusPending,
 		model.OrderStatusExpired,
 		cutoffTime,
-	).Find(&orders).Error; err != nil {
+	).Where("channel = 'local' OR channel = '' OR channel IS NULL").Find(&orders).Error; err != nil {
 		log.Printf("查询失败: %v", err)
 		c.JSON(http.StatusOK, gin.H{"code": -1, "msg": "查询失败"})
 		return
@@ -405,29 +405,29 @@ func (h *AdminHandler) CleanInvalidOrders(c *gin.Context) {
 	txErr := model.GetDB().Transaction(func(tx *gorm.DB) error {
 		// 退还预扣的手续费（在事务内操作，确保与删除一起回滚）
 		for _, order := range orders {
+			deleted := tx.Where("id = ? AND status = ?", order.ID, order.Status).Delete(&model.Order{})
+			if deleted.Error != nil {
+				return deleted.Error
+			}
+			if deleted.RowsAffected == 0 {
+				continue
+			}
+			deletedCount += deleted.RowsAffected
 			if order.FeeType == model.FeeTypeBalance && order.Status == model.OrderStatusPending {
 				feeDec := order.Fee
 				if feeDec.IsPositive() {
-					if err := tx.Model(&model.Merchant{}).Where("id = ?", order.MerchantID).
-						Update("frozen_balance", gorm.Expr("frozen_balance - ?", feeDec.String())).Error; err == nil {
-						refundCount++
+					refund := tx.Model(&model.Merchant{}).Where("id = ? AND frozen_balance >= ?", order.MerchantID, feeDec.String()).Update("frozen_balance", gorm.Expr("frozen_balance - ?", feeDec.String()))
+					if refund.Error != nil {
+						return refund.Error
 					}
+					if refund.RowsAffected != 1 {
+						return fmt.Errorf("冻结手续费不足，已撤销清理")
+					}
+					refundCount++
 				}
 			}
 		}
 
-		// 删除订单
-		result := tx.Where(
-			"status IN (?, ?) AND created_at < ?",
-			model.OrderStatusPending,
-			model.OrderStatusExpired,
-			cutoffTime,
-		).Delete(&model.Order{})
-
-		if result.Error != nil {
-			return result.Error
-		}
-		deletedCount = result.RowsAffected
 		return nil
 	})
 
@@ -958,6 +958,14 @@ func (h *AdminHandler) GetConfigs(c *gin.Context) {
 	for _, cfg := range configs {
 		configMap[cfg.Key] = cfg.Value
 	}
+	for key, value := range configMap {
+		if service.IsOfficialSecret(key) {
+			configMap[key] = ""
+			if value != "" {
+				configMap[key+"_configured"] = "1"
+			}
+		}
+	}
 
 	c.JSON(http.StatusOK, gin.H{"code": 1, "data": configMap})
 }
@@ -970,9 +978,46 @@ func (h *AdminHandler) UpdateConfigs(c *gin.Context) {
 		return
 	}
 
+	var current []model.SystemConfig
+	if err := model.GetDB().Find(&current).Error; err != nil {
+		c.JSON(http.StatusOK, gin.H{"code": -1, "msg": "读取配置失败"})
+		return
+	}
+	merged := make(map[string]string)
+	for _, row := range current {
+		merged[row.Key] = row.Value
+	}
+	validateOfficial := false
 	for key, value := range req {
-		// 使用 upsert 方式确保配置存在
-		model.GetDB().Where("`key` = ?", key).Assign(model.SystemConfig{Value: value}).FirstOrCreate(&model.SystemConfig{Key: key})
+		if service.IsOfficialSecret(key) && strings.TrimSpace(value) == "" {
+			delete(req, key)
+			continue
+		}
+		merged[key] = value
+		if strings.HasPrefix(key, "channel_alipay_official_") || strings.HasPrefix(key, "channel_wechat_official_") || strings.HasPrefix(key, "payment_channel_") || key == "site_url" {
+			validateOfficial = true
+		}
+	}
+	if validateOfficial {
+		if err := service.ValidateOfficialSettings(merged); err != nil {
+			c.JSON(http.StatusOK, gin.H{"code": -1, "msg": err.Error()})
+			return
+		}
+	}
+	if err := service.ValidateOperationalSettings(merged); err != nil {
+		c.JSON(http.StatusOK, gin.H{"code": -1, "msg": err.Error()})
+		return
+	}
+	if err := model.GetDB().Transaction(func(tx *gorm.DB) error {
+		for key, value := range req {
+			if err := tx.Where("`key` = ?", key).Assign(model.SystemConfig{Value: value}).FirstOrCreate(&model.SystemConfig{Key: key}).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		c.JSON(http.StatusOK, gin.H{"code": -1, "msg": "保存配置失败"})
+		return
 	}
 
 	// 清除汇率缓存

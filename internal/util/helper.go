@@ -35,11 +35,11 @@ func GetPaymentTypeChain(payType string) string {
 	switch payType {
 	case "trx", "trx_native":
 		return "trx"
-	case "usdt_trc20", "usdt_tron", "trc20":
+	case "usdt_trc20", "usdt_tron", "trc20", "3":
 		return "trc20"
-	case "usdt_erc20", "usdt_eth", "erc20":
+	case "usdt_erc20", "usdt_eth", "erc20", "4":
 		return "erc20"
-	case "usdt_bep20", "usdt_bsc", "bep20":
+	case "usdt_bep20", "usdt_bsc", "bep20", "5":
 		return "bep20"
 	case "usdt_polygon", "polygon":
 		return "polygon"

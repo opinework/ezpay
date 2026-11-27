@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -14,9 +13,9 @@ import (
 	"time"
 
 	"ezpay/internal/model"
+	"ezpay/internal/util"
 
 	"github.com/shopspring/decimal"
-	"gorm.io/gorm"
 )
 
 // channelHTTPClient 通道服务专用HTTP客户端
@@ -74,8 +73,18 @@ func GetChannelService() *ChannelService {
 
 // GetChannelConfig 获取指定类型的通道配置
 func (s *ChannelService) GetChannelConfig(channelType ChannelType) (*ChannelConfig, error) {
+	return s.loadChannelConfig(channelType, true)
+}
+
+func (s *ChannelService) GetCallbackChannelConfig(channelType ChannelType) (*ChannelConfig, error) {
+	return s.loadChannelConfig(channelType, false)
+}
+
+func (s *ChannelService) loadChannelConfig(channelType ChannelType, requireEnabled bool) (*ChannelConfig, error) {
 	var configs []model.SystemConfig
-	model.GetDB().Where("`key` LIKE 'channel_%'").Find(&configs)
+	if err := model.GetDB().Where("`key` LIKE 'channel_%'").Find(&configs).Error; err != nil {
+		return nil, err
+	}
 
 	configMap := make(map[string]string)
 	for _, cfg := range configs {
@@ -83,7 +92,7 @@ func (s *ChannelService) GetChannelConfig(channelType ChannelType) (*ChannelConf
 	}
 
 	prefix := fmt.Sprintf("channel_%s_", channelType)
-	if configMap[prefix+"enabled"] != "1" {
+	if requireEnabled && configMap[prefix+"enabled"] != "1" {
 		return nil, fmt.Errorf("channel %s is not enabled", channelType)
 	}
 
@@ -96,7 +105,7 @@ func (s *ChannelService) GetChannelConfig(channelType ChannelType) (*ChannelConf
 		Key:       configMap[prefix+"key"],
 		PayID:     configMap[prefix+"pay_id"],
 		NotifyKey: configMap[prefix+"notify_key"],
-		Enabled:   true,
+		Enabled:   configMap[prefix+"enabled"] == "1",
 		Priority:  priority,
 	}, nil
 }
@@ -126,15 +135,15 @@ func (s *ChannelService) GetEnabledChannels() []*ChannelConfig {
 func (s *ChannelService) CreateVmqOrder(cfg *ChannelConfig, order *model.Order, notifyURL string) (*ChannelOrderResult, error) {
 	// 构建签名: MD5(payId + param + type + price + key)
 	payType := s.mapChainToVmqType(order.Chain)
-	price := order.Money.StringFixed(2)
+	price := order.PayAmount.StringFixed(2)
 	param := order.TradeNo // 使用本地订单号作为param
 
-	signStr := order.OutTradeNo + param + payType + price + cfg.Key
+	signStr := order.TradeNo + param + payType + price + cfg.Key
 	sign := md5Hash(signStr)
 
 	// 构建请求URL
 	params := url.Values{}
-	params.Set("payId", order.OutTradeNo)
+	params.Set("payId", order.TradeNo)
 	params.Set("type", payType)
 	params.Set("price", price)
 	params.Set("sign", sign)
@@ -182,14 +191,16 @@ func (s *ChannelService) CreateVmqOrder(cfg *ChannelConfig, order *model.Order, 
 		}, nil
 	}
 
-	reallyPrice, _ := decimal.NewFromString(result.ReallyPrice)
+	reallyPrice, err := decimal.NewFromString(result.ReallyPrice)
+	if err != nil || !reallyPrice.IsPositive() {
+		return nil, fmt.Errorf("invalid vmq payment amount")
+	}
 	expireTime, _ := time.ParseInLocation("2006-01-02 15:04:05", result.TimeOut, time.Local)
 
 	return &ChannelOrderResult{
 		Success:    true,
-		OrderID:    result.OrderID,
-		PayURL:     cfg.ApiURL + result.PayURL,
-		QRCode:     result.ReallyPrice, // V免签返回的是金额，用户需要支付此金额
+		OrderID:    order.TradeNo,
+		PayURL:     resolveChannelURL(cfg.ApiURL, result.PayURL),
 		Amount:     reallyPrice,
 		ExpireTime: expireTime,
 	}, nil
@@ -204,7 +215,8 @@ func (s *ChannelService) CreateEpayOrder(cfg *ChannelConfig, order *model.Order,
 		"out_trade_no": order.TradeNo, // 使用本地订单号
 		"notify_url":   notifyURL,
 		"name":         order.Name,
-		"money":        order.Money.StringFixed(2),
+		"money":        order.Money.String(),
+		"currency":     order.Currency,
 	}
 
 	if order.ReturnURL != "" {
@@ -236,19 +248,21 @@ func (s *ChannelService) CreateEpayOrder(cfg *ChannelConfig, order *model.Order,
 	}
 
 	var result struct {
-		Code       int    `json:"code"`
-		Msg        string `json:"msg"`
-		TradeNo    string `json:"trade_no"`
-		OutTradeNo string `json:"out_trade_no"`
-		Type       string `json:"type"`
-		Money      string `json:"money"`
-		USDTAmount string `json:"usdt_amount"`
-		Rate       string `json:"rate"`
-		Address    string `json:"address"`
-		Chain      string `json:"chain"`
-		QRCode     string `json:"qrcode"`
-		ExpiredAt  string `json:"expired_at"`
-		PayURL     string `json:"pay_url"`
+		Code         int    `json:"code"`
+		Msg          string `json:"msg"`
+		TradeNo      string `json:"trade_no"`
+		OutTradeNo   string `json:"out_trade_no"`
+		Type         string `json:"type"`
+		Money        string `json:"money"`
+		USDTAmount   string `json:"usdt_amount"`
+		Rate         string `json:"rate"`
+		Address      string `json:"address"`
+		Chain        string `json:"chain"`
+		QRCode       string `json:"qrcode"`
+		ExpiredAt    string `json:"expired_at"`
+		PayURL       string `json:"pay_url"`
+		PayAmount    string `json:"pay_amount"`
+		UniqueAmount string `json:"unique_amount"`
 	}
 
 	if err := json.Unmarshal(body, &result); err != nil {
@@ -262,21 +276,55 @@ func (s *ChannelService) CreateEpayOrder(cfg *ChannelConfig, order *model.Order,
 		}, nil
 	}
 
-	usdtAmount, _ := decimal.NewFromString(result.USDTAmount)
+	amountStr := result.UniqueAmount
+	if amountStr == "" {
+		amountStr = result.PayAmount
+	}
+	if amountStr == "" {
+		amountStr = result.USDTAmount
+	}
+	if amountStr == "" {
+		amountStr = order.PayAmount.String()
+	}
+	usdtAmount, err := decimal.NewFromString(amountStr)
+	if err != nil || !usdtAmount.IsPositive() {
+		return nil, fmt.Errorf("invalid epay payment amount")
+	}
 	expireTime, _ := time.ParseInLocation("2006-01-02 15:04:05", result.ExpiredAt, time.Local)
 
 	return &ChannelOrderResult{
 		Success:    true,
 		OrderID:    result.TradeNo,
-		PayURL:     cfg.ApiURL + result.PayURL,
-		QRCode:     result.QRCode,
+		PayURL:     resolveChannelURL(cfg.ApiURL, result.PayURL),
 		Amount:     usdtAmount,
 		ExpireTime: expireTime,
 	}, nil
 }
 
+func resolveChannelURL(base, reference string) string {
+	if reference == "" {
+		return ""
+	}
+	b, err := url.Parse(base + "/")
+	if err != nil {
+		return ""
+	}
+	r, err := url.Parse(reference)
+	if err != nil {
+		return ""
+	}
+	target := b.ResolveReference(r)
+	if target.Scheme != "http" && target.Scheme != "https" {
+		return ""
+	}
+	return target.String()
+}
+
 // VerifyVmqNotify 验证V免签回调
 func (s *ChannelService) VerifyVmqNotify(cfg *ChannelConfig, payID, param, payType, price, reallyPrice, sign string) bool {
+	if cfg.Key == "" {
+		return false
+	}
 	// V免签回调签名: MD5(payId + param + type + price + reallyPrice + key)
 	signStr := payID + param + payType + price + reallyPrice + cfg.Key
 	expectedSign := md5Hash(signStr)
@@ -285,71 +333,20 @@ func (s *ChannelService) VerifyVmqNotify(cfg *ChannelConfig, payID, param, payTy
 
 // VerifyEpayNotify 验证易支付回调
 func (s *ChannelService) VerifyEpayNotify(cfg *ChannelConfig, params map[string]string, sign string) bool {
-	expectedSign := generateEpaySign(params, cfg.Key)
-	return sign == expectedSign
+	return cfg.Key != "" && util.VerifySign(params, cfg.Key, sign)
 }
 
 // HandleUpstreamNotify 处理上游通知
 func (s *ChannelService) HandleUpstreamNotify(channelType ChannelType, localTradeNo string, upstreamOrderID string, amount decimal.Decimal) error {
-	// 查找本地订单
-	var order model.Order
-	if err := model.GetDB().Where("trade_no = ?", localTradeNo).First(&order).Error; err != nil {
-		return fmt.Errorf("order not found: %s", localTradeNo)
+	order, applied, err := applyUpstreamPayment(model.GetDB(), channelType, localTradeNo, upstreamOrderID, amount)
+	if err != nil {
+		return err
 	}
-
-	if order.Status != model.OrderStatusPending {
-		log.Printf("Order %s already processed, status: %d", localTradeNo, order.Status)
-		return nil
+	if applied {
+		GetOrderService().InvalidateOrderCache(order.TradeNo)
+		go GetNotifyService().NotifyOrder(order.ID)
+		go GetTelegramService().NotifyOrderPaid(&order)
 	}
-
-	// 在事务中完成：更新订单状态 + 入账商户余额（保证原子性）
-	now := time.Now()
-	updates := map[string]interface{}{
-		"status":           model.OrderStatusPaid,
-		"actual_amount":    amount,
-		"paid_at":          &now,
-		"channel_order_id": upstreamOrderID,
-	}
-
-	txErr := model.GetDB().Transaction(func(tx *gorm.DB) error {
-		result := tx.Model(&order).
-			Where("status = ?", model.OrderStatusPending).
-			Updates(updates)
-
-		if result.Error != nil {
-			return result.Error
-		}
-		if result.RowsAffected == 0 {
-			return nil // 已被其他进程处理
-		}
-
-		// 增加商户余额（在同一事务内）
-		realAmount := order.SettlementAmount.Sub(order.Fee)
-		if order.FeeType == model.FeeTypeBalance {
-			return tx.Model(&model.Merchant{}).Where("id = ?", order.MerchantID).Updates(map[string]interface{}{
-				"balance":        gorm.Expr("balance + ?", realAmount.String()),
-				"frozen_balance": gorm.Expr("frozen_balance - ?", order.Fee.String()),
-			}).Error
-		}
-		return tx.Model(&model.Merchant{}).Where("id = ?", order.MerchantID).
-			Update("balance", gorm.Expr("balance + ?", realAmount.String())).Error
-	})
-
-	if txErr != nil {
-		return fmt.Errorf("update order failed: %w", txErr)
-	}
-
-	// 重新加载订单数据
-	model.GetDB().First(&order, order.ID)
-
-	log.Printf("Order %s paid via upstream channel, amount: %s", localTradeNo, amount)
-
-	// 触发下游通知
-	go GetNotifyService().NotifyOrder(order.ID)
-
-	// 触发 Telegram 通知
-	go GetTelegramService().NotifyOrderPaid(&order)
-
 	return nil
 }
 

@@ -4,7 +4,6 @@ import (
 	"crypto/hmac"
 	"errors"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -14,9 +13,6 @@ import (
 	"ezpay/internal/util"
 
 	"github.com/gin-gonic/gin"
-	"github.com/shopspring/decimal"
-	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 )
 
 // VmqHandler V免签兼容接口处理器
@@ -167,216 +163,14 @@ func (h *VmqHandler) CreateOrder(c *gin.Context) {
 	})
 }
 
-// AppHeart 心跳检测 (V免签监控端兼容)
-// GET /appHeart
+// AppHeart handles authenticated monitor heartbeats.
 func (h *VmqHandler) AppHeart(c *gin.Context) {
-	t := c.Query("t")
-	if t == "" {
-		c.JSON(http.StatusOK, gin.H{
-			"code": -1,
-			"msg":  "参数错误",
-		})
-		return
-	}
-
-	// 验证时间戳 (5分钟内有效)
-	ts, err := strconv.ParseInt(t, 10, 64)
-	if err != nil {
-		c.JSON(http.StatusOK, gin.H{
-			"code": -1,
-			"msg":  "时间戳无效",
-		})
-		return
-	}
-
-	now := time.Now().Unix()
-	if now-ts > 300 || ts-now > 300 {
-		c.JSON(http.StatusOK, gin.H{
-			"code": -1,
-			"msg":  "时间戳过期",
-		})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"code": 1,
-		"msg":  "success",
-	})
+	h.monitorHeartbeat(c)
 }
 
-// AppPush 收款推送 (V免签监控端兼容)
-// GET /appPush
+// AppPush handles durable, idempotent receipt events.
 func (h *VmqHandler) AppPush(c *gin.Context) {
-	t := c.Query("t")
-	payType := c.Query("type")
-	price := c.Query("price")
-	sign := c.Query("sign")
-
-	// 验证参数
-	if t == "" || price == "" || sign == "" {
-		middleware.SetAPILogContext(c, -1, "参数不完整", "", 0, "")
-		c.JSON(http.StatusOK, gin.H{
-			"code": -1,
-			"msg":  "参数不完整",
-		})
-		return
-	}
-
-	// 通过签名匹配商户（支持多商户）
-	var merchants []model.Merchant
-	if err := model.GetDB().Where("status = 1").Find(&merchants).Error; err != nil || len(merchants) == 0 {
-		middleware.SetAPILogContext(c, -1, "商户不存在", "", 0, "")
-		c.JSON(http.StatusOK, gin.H{
-			"code": -1,
-			"msg":  "商户不存在",
-		})
-		return
-	}
-
-	// 验证签名: MD5(type + price + t + key)，遍历商户匹配
-	var merchant model.Merchant
-	var signMatched bool
-	for _, m := range merchants {
-		expectedSign := util.MD5(payType + price + t + m.Key)
-		if strings.EqualFold(sign, expectedSign) {
-			merchant = m
-			signMatched = true
-			break
-		}
-	}
-
-	if !signMatched {
-		middleware.SetAPILogContext(c, -1, "签名验证失败", "", 0, "")
-		c.JSON(http.StatusOK, gin.H{
-			"code": -1,
-			"msg":  "签名验证失败",
-		})
-		return
-	}
-
-	// 解析金额
-	amount, err := decimal.NewFromString(price)
-	if err != nil {
-		middleware.SetAPILogContext(c, -1, "金额无效", "", merchant.ID, merchant.PID)
-		c.JSON(http.StatusOK, gin.H{
-			"code": -1,
-			"msg":  "金额无效",
-		})
-		return
-	}
-
-	// 映射链类型
-	// 监控端发来的是法币收款通知（微信/支付宝实际到账）
-	// 需要匹配法币订单的 chain（wechat/alipay），而非加密货币链
-	var chain string
-	switch payType {
-	case "1", "wechat":
-		chain = "wechat"
-	case "2", "alipay":
-		chain = "alipay"
-	default:
-		chain = "wechat"
-	}
-
-	// 使用事务 + 行锁，防止并发匹配同一订单
-	var order model.Order
-	var orderFound bool
-
-	txErr := model.GetDB().Transaction(func(tx *gorm.DB) error {
-		// 优先使用 unique_amount 精确匹配（MySQL 加行锁防止竞态，SQLite 单连接天然串行）
-		query := tx.Where("merchant_id = ? AND chain = ? AND unique_amount = ? AND status = ?",
-			merchant.ID, chain, amount, model.OrderStatusPending).
-			Order("created_at ASC")
-		if !model.IsSQLite() {
-			query = query.Clauses(clause.Locking{Strength: "UPDATE"})
-		}
-		err = query.First(&order).Error
-
-		if err != nil {
-			// 兼容旧订单：尝试使用 usdt_amount 精确匹配
-			fallbackQuery := tx.Where("merchant_id = ? AND chain = ? AND usdt_amount = ? AND status = ?",
-				merchant.ID, chain, amount, model.OrderStatusPending).
-				Order("created_at ASC")
-			if !model.IsSQLite() {
-				fallbackQuery = fallbackQuery.Clauses(clause.Locking{Strength: "UPDATE"})
-			}
-			err = fallbackQuery.First(&order).Error
-
-			if err != nil {
-				return nil // 未找到，但不是错误
-			}
-		}
-
-		orderFound = true
-
-		// 原子更新：再次确认 status=pending（双重保障幂等性）
-		now := time.Now()
-		result := tx.Model(&model.Order{}).
-			Where("id = ? AND status = ?", order.ID, model.OrderStatusPending).
-			Updates(map[string]interface{}{
-				"status":        model.OrderStatusPaid,
-				"actual_amount": amount,
-				"paid_at":       &now,
-			})
-
-		if result.Error != nil {
-			return result.Error
-		}
-		if result.RowsAffected == 0 {
-			// 订单已被其他请求处理（幂等：视为成功）
-			orderFound = false
-			return nil
-		}
-
-		// 增加商户余额（在同一事务内，保证原子性）
-		realAmount := order.SettlementAmount.Sub(order.Fee)
-		if order.FeeType == model.FeeTypeBalance {
-			return tx.Model(&model.Merchant{}).Where("id = ?", order.MerchantID).Updates(map[string]interface{}{
-				"balance":        gorm.Expr("balance + ?", realAmount.String()),
-				"frozen_balance": gorm.Expr("frozen_balance - ?", order.Fee.String()),
-			}).Error
-		}
-		return tx.Model(&model.Merchant{}).Where("id = ?", order.MerchantID).
-			Update("balance", gorm.Expr("balance + ?", realAmount.String())).Error
-	})
-
-	if txErr != nil {
-		middleware.SetAPILogContext(c, -1, "更新订单失败", "", merchant.ID, merchant.PID)
-		c.JSON(http.StatusOK, gin.H{
-			"code": -1,
-			"msg":  "更新订单失败",
-		})
-		return
-	}
-
-	if !orderFound {
-		middleware.SetAPILogContext(c, 0, "未找到匹配订单", "", merchant.ID, merchant.PID)
-		c.JSON(http.StatusOK, gin.H{
-			"code": 0,
-			"msg":  "未找到匹配订单",
-		})
-		return
-	}
-
-	// 使订单缓存失效
-	service.GetOrderService().InvalidateOrderCache(order.TradeNo)
-
-	// 重新加载订单数据
-	model.GetDB().First(&order, order.ID)
-
-	// 触发回调通知
-	go service.GetNotifyService().NotifyOrder(order.ID)
-
-	// 触发 Telegram 通知
-	go service.GetTelegramService().NotifyOrderPaid(&order)
-
-	// 记录成功日志
-	middleware.SetAPILogContext(c, 1, "success", order.TradeNo, merchant.ID, merchant.PID)
-
-	c.JSON(http.StatusOK, gin.H{
-		"code": 1,
-		"msg":  "success",
-	})
+	h.monitorPush(c)
 }
 
 // GetState 获取订单状态 (V免签兼容)

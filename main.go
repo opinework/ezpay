@@ -61,7 +61,8 @@ func main() {
 	gin.SetMode(gin.ReleaseMode)
 
 	// 创建路由
-	r := gin.Default()
+	r := gin.New()
+	r.Use(middleware.RequestLogger(), gin.Recovery())
 
 	// 加载模板和静态文件 (根据构建模式自动选择嵌入或文件系统)
 	funcMap := template.FuncMap{
@@ -143,6 +144,9 @@ func initServices(cfg *config.Config) {
 
 // registerRoutes 注册路由
 func registerRoutes(r *gin.Engine, cfg *config.Config) {
+	if err := r.SetTrustedProxies(cfg.Security.TrustedProxies); err != nil {
+		log.Fatalf("Invalid trusted proxy configuration: %v", err)
+	}
 	// CORS（使用配置的域名白名单）
 	r.Use(middleware.CORSWithConfig(cfg.Security.CORSAllowOrigins))
 
@@ -159,6 +163,7 @@ func registerRoutes(r *gin.Engine, cfg *config.Config) {
 	// 应用API日志中间件和IP黑名单检查到支付API
 	paymentAPI := r.Group("")
 	paymentAPI.Use(middleware.IPBlacklistCheck())
+	paymentAPI.Use(middleware.RateLimit())
 	paymentAPI.Use(middleware.APILogger())
 	{
 		// 发起支付 (表单跳转)
@@ -192,6 +197,8 @@ func registerRoutes(r *gin.Engine, cfg *config.Config) {
 	// ============ 上游通道回调 ============
 	r.GET("/channel/notify/vmq", channelHandler.VmqNotify)
 	r.GET("/channel/notify/epay", channelHandler.EpayNotify)
+	r.POST("/channel/notify/alipay_official", channelHandler.AlipayOfficialNotify)
+	r.POST("/channel/notify/wechat_official", channelHandler.WechatOfficialNotify)
 
 	// ============ Telegram Webhook ============
 	telegramHandler := handler.NewTelegramHandler()
@@ -204,7 +211,7 @@ func registerRoutes(r *gin.Engine, cfg *config.Config) {
 	})
 
 	// 登录 (无需认证)
-	r.POST("/admin/api/login", adminHandler.Login)
+	r.POST("/admin/api/login", middleware.LoginRateLimit(), adminHandler.Login)
 
 	// 需要认证的管理API
 	adminAPI := r.Group("/admin/api")
@@ -330,7 +337,7 @@ func registerRoutes(r *gin.Engine, cfg *config.Config) {
 	})
 
 	// 商户登录 (无需认证)
-	r.POST("/merchant/api/login", merchantHandler.Login)
+	r.POST("/merchant/api/login", middleware.LoginRateLimit(), merchantHandler.Login)
 
 	// 需要认证的商户API
 	merchantAPI := r.Group("/merchant/api")
@@ -473,6 +480,7 @@ func startBackgroundServices(cfg *config.Config) {
 
 	// 启动订单过期处理
 	service.GetOrderService().StartExpireWorker()
+	service.StartOfficialReconciliation()
 
 	// 启动通知重试
 	service.GetNotifyService().StartNotifyWorker()
